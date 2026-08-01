@@ -21,6 +21,74 @@ terminal's alternate screen for the duration and always restores both.
 `random-state` seeds the fall-timing and glyph randomness. Returns the final
 [`matrix-state`](#matrix-state).
 
+## Building a custom driver loop
+
+`run-matrix` bundles terminal setup, a real-time tick loop, and quit-key
+handling around a [`matrix-state`](#matrix-state). A caller who wants
+different I/O -- a custom event loop, a non-terminal renderer, or its own
+quit-key policy -- can drive the animation directly with the pieces below
+instead of calling `run-matrix`.
+
+### `run-state`
+
+```lisp
+(make-run-state &key matrix renderer quitp input-stream)
+```
+
+The mutable driver state threaded through
+`cl-tty-kit:tick-loop-run-realtime`. Readers: `run-state-matrix` (the
+[`matrix-state`](#matrix-state) proper), `run-state-renderer` (the
+double-buffered `cl-tty-kit` repaint helper), `run-state-quitp` (set once a
+quit key has been seen), `run-state-input-stream` (where `poll-quit-key`
+looks for one). Kept separate from `matrix-state` so that struct stays free
+of I/O and can go on being used by the pure, deterministic tests in `t/`.
+
+### `run-state-advance`
+
+```lisp
+(run-state-advance run-state &key (fd 0) (terminal-size-fn #'terminal-size))
+```
+
+Advance `run-state` by one tick: reflow for the current terminal size (via
+`terminal-size-fn`), advance the underlying `matrix-state` via
+[`matrix-advance`](#matrix-advance), resize the renderer to match, and
+record whether a quit key has arrived on `run-state`'s `input-stream`.
+Returns `run-state`, mutated in place -- unlike `matrix-advance`, this is
+the impure side of the split, and is never used by the deterministic
+bounded-tick tests.
+
+### `run-state-render`
+
+```lisp
+(run-state-render run-state)
+```
+
+Redraw `run-state`'s renderer back buffer from its current `matrix-state`
+and return the diffed ANSI frame string for this tick.
+
+### `quit-key-character-p` / `poll-quit-key`
+
+```lisp
+(quit-key-character-p character)
+(poll-quit-key stream)
+```
+
+`quit-key-character-p` is true when `character` should stop the animation:
+`q`, `Q`, or `Escape`, or the raw Ctrl-C byte (character code 3).
+`poll-quit-key` consumes every character currently available on `stream`
+without blocking, returning true as soon as one of them satisfies
+`quit-key-character-p` (the rest, if any, are still consumed, since none of
+them will be looked at again). Used instead of a blocking read because a
+real-time animation loop cannot afford to wait on a key that may never
+come; works against any character stream -- including a
+`string-input-stream` in a test -- not only a live terminal.
+
+Together these compose the loop `run-matrix` itself drives: `make-run-state`
+builds the initial state around a `matrix-state` and a renderer, each tick
+calls `run-state-advance` (which polls `poll-quit-key` on the
+`input-stream`) and then `run-state-render`, and the loop stops once
+`run-state-quitp` is true.
+
 ## Building and advancing state
 
 ### `make-matrix-state`
@@ -93,6 +161,14 @@ The glyph `column` shows at `row`, and whether `row` is currently part of
 
 Return every registered scheme name: `:green` (the default), `:cyan`,
 `:red`, `:blue`, `:magenta`, `:yellow`, `:white`.
+
+### `color-scheme-p`
+
+```lisp
+(color-scheme-p name)
+```
+
+True when `name` is a registered color scheme.
 
 ### `color-scheme-head-rgb` / `color-scheme-bright-rgb` / `color-scheme-dark-rgb`
 
