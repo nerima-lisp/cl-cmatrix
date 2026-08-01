@@ -1,0 +1,47 @@
+site_name: cl-cmatrix
+site_description: A Matrix-style digital rain terminal screensaver for SBCL.
+site_url: https://nerima-lisp.github.io/cl-cmatrix/
+repo_url: https://github.com/nerima-lisp/cl-cmatrix
+repo_name: nerima-lisp/cl-cmatrix
+edit_uri: edit/main/docs/src/
+
+docs_dir: src
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.details
+
+# Every page under docs/src/ must appear here: --strict fails the build on an
+# unlisted page. See PACKAGE_STANDARD.md / DOCS_STANDARD.md.
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Reference:
+      - API: reference/api.md
