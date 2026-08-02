@@ -38,6 +38,21 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Not a dependency this package names anywhere: cl-tty-kit v1.2.0 grew a
+    # `:depends-on ("cl-codec-kit")`, and cl-tty-kit's package installs only
+    # its OWN source tree, so putting it on this build's registry leaves ASDF
+    # unable to resolve that edge -- `Component "cl-codec-kit" not found,
+    # required by #<SYSTEM "cl-tty-kit">`. Dependency-free itself.
+    # `flake = false`: consumed as a SOURCE TREE and built here, not read from
+    # its own `packages` output. cl-codec-kit has not cut a release declaring
+    # aarch64-darwin, so reading `packages.${system}` would fail on macOS; a
+    # source tree has no platform at all. This is ADR-0079's default shape --
+    # a non-flake input also contributes no second nixpkgs to flake.lock.
+    cl-codec-kit = {
+      url = "github:nerima-lisp/cl-codec-kit/v0.4.0";
+      flake = false;
+    };
+
     # Declarative CLI parsing plus --help/--version scaffolding, used by
     # src/cli.lisp.
     cl-cli = {
@@ -58,6 +73,7 @@
       cl-nix-forge,
       cl-weave,
       cl-tty-kit,
+      cl-codec-kit,
       cl-cli,
       treefmt-nix,
     }:
@@ -112,9 +128,23 @@
       # directories -- putting a sibling's uncompiled source on the registry
       # instead would have ASDF try to write fasls next to it, inside the
       # read-only Nix store.
+      # `fromDerivation` on cl-tty-kit, plain on cl-cli. The two siblings are
+      # built by different machinery: cl-cli's flake is a `mkPackageFlake`
+      # adopter, so its package carries the `passthru.ancestry` cl-nix-forge's
+      # deduplicating registry walk reads, while cl-tty-kit still builds its
+      # own package with nixpkgs' `pkgs.sbcl.buildASDFSystem`, which does not.
+      # Passing the latter straight through fails evaluation with
+      # `attribute 'ancestry' missing`; `fromDerivation` is cl-nix-forge's own
+      # adapter for exactly that -- a package it did not build and about which
+      # it can assume nothing. cl-regex-kit wraps cl-weave the same way.
       lispDependencies =
         ctx: [
-          cl-tty-kit.packages.${ctx.system}.cl-tty-kit
+          (ctx.cl.fromDerivation { drv = cl-tty-kit.packages.${ctx.system}.cl-tty-kit; })
+          (ctx.cl.lispDerivation {
+            lispSystem = "cl-codec-kit";
+            version = ctx.cl.fromAsdSystem "${cl-codec-kit}/cl-codec-kit.asd";
+            src = cl-codec-kit;
+          })
           cl-cli.packages.${ctx.system}.cl-cli
         ];
 
