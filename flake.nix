@@ -24,7 +24,7 @@
     };
 
     cl-weave = {
-      url = "github:nerima-lisp/cl-weave/v1.1.0";
+      url = "github:nerima-lisp/cl-weave/v1.1.4";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -34,14 +34,14 @@
     # src/tick-loop.lisp (TICK-LOOP-RUN-REALTIME), which this project's
     # animation loop depends on directly.
     cl-tty-kit = {
-      url = "github:nerima-lisp/cl-tty-kit/v1.1.0";
+      url = "github:nerima-lisp/cl-tty-kit/v1.2.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # Declarative CLI parsing plus --help/--version scaffolding, used by
     # src/cli.lisp.
     cl-cli = {
-      url = "github:nerima-lisp/cl-cli/v1.1.0";
+      url = "github:nerima-lisp/cl-cli/v1.2.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
