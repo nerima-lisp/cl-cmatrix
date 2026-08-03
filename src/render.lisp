@@ -48,11 +48,14 @@ when true, renders that trail row bold too, not only the head."
   (let ((head (column-head column))
         (length (column-length column))
         (glyphs (column-glyphs column)))
+    (declare (type fixnum head length height))
     (loop for offset fixnum from 0 below length
-          for row = (- head offset)
+          for row fixnum = head then (1- row)
+          for glyph-index fixnum = (mod head length)
+            then (if (zerop glyph-index) (1- length) (1- glyph-index))
           while (>= row 0)
             when (< row height)
-            do (screen-put-cell screen x row (svref glyphs (mod row length))
+            do (screen-put-cell screen x row (svref glyphs glyph-index)
                                  :style (svref styles offset)))))
 
 (defun %column-color (x color rainbow-schemes)
