@@ -13,7 +13,11 @@
   "The full state of a matrix-rain animation at one tick. COLUMNS is a
 SIMPLE-VECTOR of WIDTH COLUMN structures, one per screen column. BOLD, when
 true, renders every lit row bold rather than only the head (see
-MATRIX-CELL-STYLE)."
+MATRIX-CELL-STYLE). STYLE-CACHE is MATRIX-DRAW's memo of the per-trail-length
+style vectors it draws with; it lives here, rather than being rebuilt per
+frame, because its whole key space (color x trail-length x bold) is fixed for
+a state's lifetime -- MATRIX-ADVANCE and MATRIX-RESIZE both go through
+%COPY-MATRIX-STATE, which carries the same table forward."
   (width 0 :type fixnum)
   (height 0 :type fixnum)
   (columns #() :type simple-vector)
@@ -22,7 +26,8 @@ MATRIX-CELL-STYLE)."
   (color :green :type keyword)
   (glyphs +default-glyphs+ :type simple-vector)
   (bold nil :type boolean)
-  (tick 0 :type fixnum))
+  (tick 0 :type fixnum)
+  (style-cache (make-hash-table :test #'eq) :type hash-table))
 
 (defun %assert-dimensions (width height)
   (unless (and (typep width '(integer 1 *)) (typep height '(integer 1 *)))

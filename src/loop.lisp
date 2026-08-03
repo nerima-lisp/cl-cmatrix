@@ -152,7 +152,8 @@ already resolved rather than reaching for itself."
     (make-run-state :matrix matrix :renderer renderer
                      :quitp nil :input-stream input-stream)))
 
-(defun run-matrix (&key (speed 1) (color :green) (glyphs +default-glyphs+) (bold nil)
+(defun run-matrix (&key (speed (%default-speed)) (color (%default-color))
+                        (glyphs +default-glyphs+) (bold (%default-bold))
                         (stream *standard-output*)
                         (input-stream *standard-input*) (fd 0)
                         (fps +default-fps+) (random-state (make-random-state t)))

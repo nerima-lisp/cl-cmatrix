@@ -24,6 +24,8 @@ COLOR-CHOICE-P in color-scheme.lisp)."
           (list "rainbow")))
 
 (defun %cmatrix-charset-choices ()
+  "Every --charset choice: the downcased name of each registered glyph set
+(see LIST-CHARSETS in glyphs.lisp)."
   (mapcar (lambda (name) (string-downcase (symbol-name name))) (list-charsets)))
 
 (defun %cmatrix-random-state (seed)
@@ -96,9 +98,10 @@ binary (0/1) (default ascii).")
          (make-option :name "bold" :short #\b :kind :flag
                       :description "Render the whole trail bold, not only the head (default off).")
          (make-option :name "fps" :short #\u :kind :value :type :integer
-                      :min 1 :default +default-fps+
+                      :min 1 :max 240 :default +default-fps+
                       :description "Ticks per second (default 30).")
          (make-option :name "seed" :kind :value :type :integer
+                      :min 0
                       :description
                       "Random seed for a reproducible run (default: a new
 random run every time)."))

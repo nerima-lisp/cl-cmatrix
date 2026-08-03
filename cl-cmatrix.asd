@@ -15,7 +15,7 @@
   :description "A Matrix-style digital rain terminal screensaver for SBCL."
   :long-description "Full-screen falling-character animation: one independently falling stream per
 terminal column, each with a bright head and a color-graded 256-color dimming trail. Eleven color
-schemes (one, rainbow, a different scheme per column), three glyph sets (ASCII, half-width
+schemes plus rainbow (a different scheme per column), three glyph sets (ASCII, half-width
 katakana, binary), and an optional bold trail. Reflows on terminal resize (polled, not a SIGWINCH
 handler) and quits cleanly on q/Escape/Ctrl-C, always restoring the terminal's prior state. Fall
 speed, glyph choice, and reset timing all route through an injectable random state, so a run

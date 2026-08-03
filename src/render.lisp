@@ -34,11 +34,22 @@ when true, renders that trail row bold too, not only the head."
         (if bold (make-style :bold fg) (make-style fg)))))
 
 (defun %matrix-style-vector (color trail-length bold cache)
-  (let ((length-cache (or (gethash color cache)
-                          (setf (gethash color cache)
-                                (make-hash-table)))))
-    (or (gethash trail-length length-cache)
-        (setf (gethash trail-length length-cache)
+  "Return the memoized vector of TRAIL-LENGTH styles a column of that length
+draws with under COLOR and BOLD, computing it via MATRIX-CELL-STYLE on the
+first request. CACHE is a MATRIX-STATE's own STYLE-CACHE slot, so entries
+persist for that state's whole lifetime rather than only the current frame;
+BOLD is part of the key (color -> trail-length -> bold -> styles) precisely
+because of that -- with a per-frame cache it was frame-invariant and could be
+left out, but a cache that outlives the frame must key on everything
+MATRIX-CELL-STYLE actually reads."
+  (let* ((length-cache (or (gethash color cache)
+                           (setf (gethash color cache)
+                                 (make-hash-table))))
+         (bold-cache (or (gethash trail-length length-cache)
+                         (setf (gethash trail-length length-cache)
+                               (make-hash-table)))))
+    (or (gethash bold bold-cache)
+        (setf (gethash bold bold-cache)
               (let ((styles (make-array trail-length)))
                 (dotimes (offset trail-length styles)
                   (setf (svref styles offset)
@@ -59,10 +70,12 @@ when true, renders that trail row bold too, not only the head."
                                  :style (svref styles offset)))))
 
 (defun %column-color (x color rainbow-schemes)
-  "Resolve the real color scheme column X draws with: COLOR itself, unless
-COLOR is :RAINBOW, in which case each column index cycles through
-RAINBOW-SCHEMES (LIST-COLOR-SCHEMES' own order) so adjacent columns fall in
-visibly different colors."
+  "Resolve the real color scheme column X draws with. Branches on
+RAINBOW-SCHEMES, not on COLOR: when RAINBOW-SCHEMES is non-NIL, column index
+X cycles through it (in LIST-COLOR-SCHEMES' own order) so adjacent columns
+fall in visibly different colors; when it is NIL, COLOR is returned as-is.
+Callers are expected to pass a non-NIL RAINBOW-SCHEMES only when COLOR is
+:RAINBOW -- MATRIX-DRAW, the sole caller, does exactly that."
   (if rainbow-schemes
       (nth (mod x (length rainbow-schemes)) rainbow-schemes)
       color))
@@ -78,7 +91,7 @@ scheme by column index rather than all sharing one. Returns SCREEN."
          (color (matrix-state-color state))
          (bold (matrix-state-bold state))
          (rainbow-schemes (when (eq color :rainbow) (list-color-schemes)))
-         (style-cache (make-hash-table :test #'eq)))
+         (style-cache (matrix-state-style-cache state)))
     (with-screen-batch (screen)
       (loop for x fixnum below (matrix-state-width state)
             for column = (svref (matrix-state-columns state) x)
@@ -86,4 +99,5 @@ scheme by column index rather than all sharing one. Returns SCREEN."
             do (%matrix-draw-column
                 screen x column height
                 (%matrix-style-vector column-color (column-length column)
-                                      bold style-cache))))))
+                                      bold style-cache))))
+    screen))

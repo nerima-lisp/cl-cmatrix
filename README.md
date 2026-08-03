@@ -11,7 +11,7 @@ q/Escape/Ctrl-C, always restoring the terminal's prior state. The default
 glyph set is plain printable ASCII, not a port of the classic `cmatrix`'s
 proprietary katakana bitmap font -- though a Unicode half-width katakana
 glyph set is available via `--charset katakana` for a closer look, alongside
-`--charset binary` and eleven color schemes, one of them (`rainbow`) a
+`--charset binary` and eleven color schemes, plus `rainbow` for a
 different scheme per column.
 
 Full documentation is published at <https://nerima-lisp.github.io/cl-cmatrix/>.

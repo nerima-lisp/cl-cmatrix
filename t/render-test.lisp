@@ -9,6 +9,34 @@ sublists, so ASSOC cannot walk it directly -- ASSOC calls CAR on every
 element, including the bare keywords, which are not conses."
   (find-if (lambda (item) (and (consp item) (eq (first item) :fg))) style))
 
+(defun %non-head-lit-cell (state)
+  "Return (VALUES X ROW) locating the first on-screen lit cell of STATE that
+is not its column's head, or (VALUES NIL NIL) when STATE has none. Only a
+non-head cell distinguishes BOLD from the default, since the head is bold
+either way -- so callers must also assert that they actually got one, or a
+state whose columns happened to show nothing but heads would let the whole
+assertion pass without ever running."
+  (loop for x below (matrix-state-width state)
+        for column = (aref (matrix-state-columns state) x)
+        do (loop for row below (matrix-state-height state)
+                 when (and (column-row-lit-p column row)
+                           (/= row (column-head column)))
+                   do (return-from %non-head-lit-cell (values x row))))
+  (values nil nil))
+
+(defun %drawn-trail-frame (bold)
+  "Advance a fixed-seed 3x24 state 30 ticks under BOLD, draw it, and return
+(VALUES SCREEN X ROW) with X/ROW from %NON-HEAD-LIT-CELL. BOLD feeds no
+random draw, so both BOLD values yield identical columns and therefore the
+same X/ROW -- the two frames differ only in the style at that cell."
+  (let ((state (make-matrix-state 3 24 :bold bold
+                                        :random-state (sb-ext:seed-random-state 30))))
+    (dotimes (i 30) (setf state (matrix-advance state)))
+    (let ((screen (make-screen 3 24)))
+      (matrix-draw screen state)
+      (multiple-value-bind (x row) (%non-head-lit-cell state)
+        (values screen x row)))))
+
 (describe "matrix-cell-style"
   (it "renders the head (offset 0) bold in the scheme's head color"
     (let ((style (matrix-cell-style :green 0 5)))
@@ -80,7 +108,8 @@ element, including the bare keywords, which are not conses."
     (let* ((width 3)
            (state (make-matrix-state width 24 :color :rainbow
                                       :random-state (sb-ext:seed-random-state 33)))
-           (schemes (list-color-schemes)))
+           (schemes (list-color-schemes))
+           (checked 0))
       (dotimes (i 40) (setf state (matrix-advance state)))
       (let ((screen (make-screen width 24)))
         (matrix-draw screen state)
@@ -89,11 +118,99 @@ element, including the bare keywords, which are not conses."
                 for column = (aref (matrix-state-columns state) x)
                 for trail-row = (1- (column-head column))
                 when (and (>= trail-row 0) (< trail-row 24) (column-row-lit-p column trail-row))
-                  do (expect
+                  do (incf checked)
+                     (expect
                       (equal (cell-style (screen-cell screen x trail-row))
                              (matrix-cell-style (nth (mod x (length schemes)) schemes) 1
                                                  (column-length column)))
-                      :to-be-truthy)))))))
+                      :to-be-truthy))
+          ;; Every assertion above sits behind a WHEN, so without this the
+          ;; whole IT reports green on any state where no column happens to
+          ;; show an on-screen trail row -- a hazard of the shape of the
+          ;; loop, not of this particular seed.
+          (expect (plusp checked) :to-be-truthy)))))
+
+  (it "renders a lit non-head row bold when STATE's BOLD is true"
+    (multiple-value-bind (screen x row) (%drawn-trail-frame t)
+      (with-soft-assertions
+        (expect (and x row) :to-be-truthy)
+        (expect (and x row (member :bold (cell-style (screen-cell screen x row))))
+                :to-be-truthy))))
+
+  (it "leaves that same lit non-head row unbold when STATE's BOLD is false"
+    (multiple-value-bind (screen x row) (%drawn-trail-frame nil)
+      (with-soft-assertions
+        (expect (and x row) :to-be-truthy)
+        (expect (and x row (not (member :bold (cell-style (screen-cell screen x row)))))
+                :to-be-truthy)))))
+
+(describe "%matrix-style-vector"
+  (it "returns the identical vector object on a repeat call, rather than recomputing it"
+    (let ((cache (make-hash-table :test #'eq)))
+      (expect (eq (cl-cmatrix::%matrix-style-vector :green 5 nil cache)
+                  (cl-cmatrix::%matrix-style-vector :green 5 nil cache))
+              :to-be-truthy)))
+
+  (it "keys on BOLD, so a bold request never shares the non-bold entry in one cache"
+    (let* ((cache (make-hash-table :test #'eq))
+           (plain (cl-cmatrix::%matrix-style-vector :green 5 nil cache))
+           (bold (cl-cmatrix::%matrix-style-vector :green 5 t cache)))
+      (with-soft-assertions
+        (expect (not (eq plain bold)) :to-be-truthy)
+        (expect (notevery #'equal plain bold) :to-be-truthy))))
+
+  (it "fills each offset with MATRIX-CELL-STYLE's own result for that offset"
+    (let* ((cache (make-hash-table :test #'eq))
+           (styles (cl-cmatrix::%matrix-style-vector :green 5 nil cache)))
+      (with-soft-assertions
+        (expect (= (length styles) 5) :to-be-truthy)
+        (loop for offset below 5
+              do (expect (equal (svref styles offset)
+                                (matrix-cell-style :green offset 5 nil))
+                         :to-be-truthy))))))
+
+(describe "%matrix-draw-column"
+  (it "draws nothing at all when the whole column still sits above row 0"
+    (let ((column (cl-cmatrix::%make-column :head -1 :length 4 :glyphs #(#\a #\b #\c #\d)))
+          (styles (cl-cmatrix::%matrix-style-vector :green 4 nil (make-hash-table :test #'eq)))
+          (screen (make-screen 1 6)))
+      (cl-cmatrix::%matrix-draw-column screen 0 column 6 styles)
+      (with-soft-assertions
+        (loop for row below 6
+              do (expect (char= (cell-char (screen-cell screen 0 row)) #\Space)
+                         :to-be-truthy)))))
+
+  (it "stops at row 0 rather than walking the rest of the trail off the top edge"
+    (let ((column (cl-cmatrix::%make-column :head 1 :length 4 :glyphs #(#\a #\b #\c #\d)))
+          (styles (cl-cmatrix::%matrix-style-vector :green 4 nil (make-hash-table :test #'eq)))
+          (screen (make-screen 1 6)))
+      (cl-cmatrix::%matrix-draw-column screen 0 column 6 styles)
+      (with-soft-assertions
+        (expect (char= (cell-char (screen-cell screen 0 1)) (column-glyph-at-row column 1))
+                :to-be-truthy)
+        (expect (char= (cell-char (screen-cell screen 0 0)) (column-glyph-at-row column 0))
+                :to-be-truthy)
+        (loop for row from 2 below 6
+              do (expect (char= (cell-char (screen-cell screen 0 row)) #\Space)
+                         :to-be-truthy)))))
+
+  (it "skips the rows at or past HEIGHT while still drawing the ones below it"
+    (let ((column (cl-cmatrix::%make-column :head 5 :length 4 :glyphs #(#\a #\b #\c #\d)))
+          (styles (cl-cmatrix::%matrix-style-vector :green 4 nil (make-hash-table :test #'eq)))
+          (screen (make-screen 1 6)))
+      (cl-cmatrix::%matrix-draw-column screen 0 column 4 styles)
+      (with-soft-assertions
+        (expect (char= (cell-char (screen-cell screen 0 5)) #\Space) :to-be-truthy)
+        (expect (char= (cell-char (screen-cell screen 0 4)) #\Space) :to-be-truthy)
+        (expect (char= (cell-char (screen-cell screen 0 3)) (column-glyph-at-row column 3))
+                :to-be-truthy)
+        (expect (char= (cell-char (screen-cell screen 0 2)) (column-glyph-at-row column 2))
+                :to-be-truthy)
+        ;; Row 3 is OFFSET 2: the clipped rows above still consumed their
+        ;; offsets, so the visible trail keeps fading from where the
+        ;; off-screen head left off instead of restarting at offset 0.
+        (expect (equal (cell-style (screen-cell screen 0 3)) (svref styles 2))
+                :to-be-truthy)))))
 
 (describe "%column-color"
   (it "returns COLOR unchanged when RAINBOW-SCHEMES is NIL"
