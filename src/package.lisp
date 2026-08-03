@@ -9,8 +9,7 @@
 
 #-sbcl
 (error "cl-cmatrix currently requires SBCL (it relies on cl-tty-kit, which is
-itself SBCL-only). See the \"Compatibility\" section of the README for
-details.")
+itself SBCL-only). See docs/src/reference/compatibility.md for details.")
 
 (defpackage #:cl-cmatrix
   (:use #:cl)
@@ -23,6 +22,7 @@ details.")
                 #:rgb-to-256
                 #:blend-colors
                 #:screen-put-cell
+                #:with-screen-batch
                 #:make-renderer
                 #:renderer-screen
                 #:renderer-width
@@ -43,12 +43,20 @@ details.")
    #:invalid-speed-speed
    #:unknown-color-scheme
    #:unknown-color-scheme-name
+   #:unknown-charset
+   #:unknown-charset-name
    ;; glyphs
    #:+default-glyphs+
+   #:+katakana-glyphs+
+   #:+binary-glyphs+
    #:random-glyph
+   #:list-charsets
+   #:charset-p
+   #:charset-glyphs
    ;; color schemes
    #:list-color-schemes
    #:color-scheme-p
+   #:color-choice-p
    #:color-scheme-head-rgb
    #:color-scheme-bright-rgb
    #:color-scheme-dark-rgb
@@ -71,6 +79,7 @@ details.")
    #:matrix-state-speed
    #:matrix-state-color
    #:matrix-state-glyphs
+   #:matrix-state-bold
    #:matrix-state-tick
    #:matrix-advance
    #:matrix-resize
@@ -78,16 +87,19 @@ details.")
    #:matrix-cell-style
    #:matrix-draw
    ;; real-time driver loop
+   #:+default-fps+
    #:run-state
    #:make-run-state
    #:run-state-matrix
    #:run-state-renderer
    #:run-state-quitp
    #:run-state-input-stream
+   #:run-state-poll
    #:run-state-advance
    #:run-state-render
    #:quit-key-character-p
    #:poll-quit-key
+   #:poll-quit-key-cps
    #:run-matrix))
 
 (defpackage #:cl-cmatrix/cli
@@ -95,13 +107,19 @@ details.")
   (:use #:cl)
   (:import-from #:cl-cmatrix
                 #:run-matrix
-                #:list-color-schemes)
+                #:list-color-schemes
+                #:list-charsets
+                #:charset-glyphs
+                #:+default-fps+)
   (:import-from #:cl-cli
                 #:make-app
                 #:make-option
                 #:run-app
                 #:option-value
                 #:current-process-argv)
+  (:import-from #:host-kit
+                #:quit
+                #:getcwd)
   (:export
    #:make-cmatrix-app
    #:main

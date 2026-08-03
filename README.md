@@ -7,9 +7,12 @@
 A Matrix-style digital rain terminal screensaver for SBCL: one independently
 falling character stream per terminal column, each with a bright head and a
 256-color dimming trail. Reflows on terminal resize and quits cleanly on
-q/Escape/Ctrl-C, always restoring the terminal's prior state. Not a port of
-the classic `cmatrix`'s katakana bitmap font -- the default glyph set is
-plain printable ASCII, an original and simpler choice.
+q/Escape/Ctrl-C, always restoring the terminal's prior state. The default
+glyph set is plain printable ASCII, not a port of the classic `cmatrix`'s
+proprietary katakana bitmap font -- though a Unicode half-width katakana
+glyph set is available via `--charset katakana` for a closer look, alongside
+`--charset binary` and eleven color schemes, one of them (`rainbow`) a
+different scheme per column.
 
 Full documentation is published at <https://nerima-lisp.github.io/cl-cmatrix/>.
 The source for that site lives in [docs/src/](docs/src/).
@@ -19,6 +22,8 @@ The source for that site lives in [docs/src/](docs/src/).
 ```sh
 cl-cmatrix                  # default green rain at normal speed
 cl-cmatrix --speed 2 -c cyan
+cl-cmatrix -c rainbow -g katakana -b   # rainbow katakana, bold trail
+cl-cmatrix --seed 42                    # reproducible run
 ```
 
 Or as a library:
@@ -31,6 +36,17 @@ Or as a library:
 
 ## Install
 
+As a command, from a checkout:
+
+```sh
+nix build              # -> ./result/bin/cl-cmatrix
+./result/bin/cl-cmatrix --speed 2 -c cyan
+```
+
+Or without cloning: `nix run github:nerima-lisp/cl-cmatrix`.
+
+As a library, from another flake:
+
 ```nix
 # flake.nix
 inputs.cl-cmatrix = {
@@ -40,17 +56,23 @@ inputs.cl-cmatrix = {
 ```
 
 Note the pinned tag. Consumers inside this org must pin a release tag rather
-than follow the default branch.
+than follow the default branch. On a `lispDependencies` edge, read
+`cl-cmatrix.packages.<system>.cl-cmatrix` -- `packages.default` is the
+delivered binary, not the ASDF system.
 
 ## Documentation
 
 - [Getting started](https://nerima-lisp.github.io/cl-cmatrix/getting-started/)
 - [API reference](https://nerima-lisp.github.io/cl-cmatrix/reference/api/)
+- [Conditions](https://nerima-lisp.github.io/cl-cmatrix/reference/conditions/)
+- [Architecture](https://nerima-lisp.github.io/cl-cmatrix/reference/architecture/)
+- [Compatibility](https://nerima-lisp.github.io/cl-cmatrix/reference/compatibility/)
 
 ## Development
 
 ```sh
 nix develop          # SBCL with CL_SOURCE_REGISTRY already set
+nix build            # -> ./result/bin/cl-cmatrix
 nix run .#test       # run the test suite
 nix flake check      # tests + formatting + docs, the same gate CI uses
 nix fmt              # format Nix sources (treefmt)
@@ -59,7 +81,11 @@ nix fmt              # format Nix sources (treefmt)
 Tests live in `t/` and run under [cl-weave](https://github.com/nerima-lisp/cl-weave),
 the org's test framework. Fall timing, glyph choice, and reset are all routed
 through an injectable `RANDOM-STATE`, so the deterministic tests pin exact
-output from a fixed seed rather than asserting on visual output.
+output from a fixed seed rather than asserting on visual output. Parametrized
+cases use cl-weave's `it-each` table-test macro rather than a hand-rolled
+loop over `expect`, so each input gets its own named pass/fail instead of one
+aggregate result; shared setup uses `before-each` fixtures over a dynamic
+variable rather than copy-pasted `let` bindings.
 
 ## Contributing
 

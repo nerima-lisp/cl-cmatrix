@@ -19,7 +19,7 @@
     # follows that repository's default branch and would change this build
     # without warning.
     cl-nix-forge = {
-      url = "github:nerima-lisp/cl-nix-forge/v0.4.0";
+      url = "github:nerima-lisp/cl-nix-forge/v0.4.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -30,11 +30,17 @@
 
     # Raw mode, the alternate screen, 256-color styling, the double-buffered
     # renderer, and the real-time tick loop, used by src/loop.lisp and
-    # src/render.lisp. Pinned to v1.1.0: that is the tag carrying
-    # src/tick-loop.lisp (TICK-LOOP-RUN-REALTIME), which this project's
-    # animation loop depends on directly.
+    # src/render.lisp. v1.1.0 was the first tag carrying src/tick-loop.lisp
+    # (TICK-LOOP-RUN-REALTIME), which this project's animation loop depends
+    # on directly; pinned to the current latest release since. v1.4.0 grew
+    # TICK-LOOP-RUN-REALTIME's own :POLL argument, which src/loop.lisp now
+    # drives with RUN-STATE-POLL (terminal size/quit-key observation) ahead
+    # of RUN-STATE-ADVANCE (the pure MATRIX-ADVANCE step) every tick, and
+    # WITH-SCREEN-BATCH, which src/render.lisp now wraps MATRIX-DRAW's whole
+    # frame in -- both added specifically for this project's "many small
+    # per-cell writes every tick" shape, per v1.4.0's own CHANGELOG.
     cl-tty-kit = {
-      url = "github:nerima-lisp/cl-tty-kit/v1.3.0";
+      url = "github:nerima-lisp/cl-tty-kit/v1.4.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -60,6 +66,40 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # QUIT, GETCWD and TRUENAMIZE, used by src/cli.lisp and
+    # scripts/coverage-entry.lisp in place of ASDF's own bundled UIOP.
+    # `flake = false`, same reasoning as cl-codec-kit above: cl-host-kit has
+    # not cut a release declaring aarch64-darwin (its flake's `packages`
+    # covers x86_64-linux only), so reading `packages.${system}` would fail
+    # evaluation on this development machine. Its own :DEPENDS-ON is just
+    # `sb-posix`, an SBCL-bundled contrib, so building it as a source tree
+    # here costs nothing extra.
+    #
+    # PINNED TO v0.2.5, NOT THE LATEST v0.3.0 -- tried and reverted 2026-08-03.
+    # Since cl-cli's 2026-08-01 uiop->cl-host-kit migration, `cl-cli` v1.3.0's
+    # OWN `:depends-on` names "cl-host-kit" too (a REAL runtime dependency,
+    # not test-only), and cl-cli's own flake pins it to v0.2.5, `flake =
+    # false`, the exact same shape as here. cl-nix-forge's `mkExecutable`
+    # `installSource` step dedupes a shared sibling dependency by SOURCE-TREE
+    # IDENTITY (same commit -> same Nix store path -> recognized as "the same
+    # dependency", installed once) -- not by name or version number alone.
+    # Bumping only this file's pin to v0.3.0 makes cl-cmatrix's own
+    # cl-host-kit a DIFFERENT source tree than the v0.2.5 cl-cli already
+    # bundles into its own closure, and two different trees both named
+    # "cl-host-kit" is exactly what `installSource` refuses ("cl-host-kit
+    # names more than one of them") -- confirmed by reproducing it with both
+    # a plain `packages.${system}` reference AND a `flake = false` +
+    # `lispDerivation` reference at v0.3.0, ruling out the consumption
+    # mechanism as the cause. This pin can only move to v0.3.0 once cl-cli
+    # itself bumps its own cl-host-kit pin to match -- moving it here alone
+    # trades a verified, tested pin for an unverified guess, exactly what
+    # cl-cli's own flake.nix warns against doing to ITS cl-boundary-kit pin
+    # for the identical reason.
+    cl-host-kit = {
+      url = "github:nerima-lisp/cl-host-kit/v0.2.5";
+      flake = false;
+    };
+
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -75,6 +115,7 @@
       cl-tty-kit,
       cl-codec-kit,
       cl-cli,
+      cl-host-kit,
       treefmt-nix,
     }:
     let
@@ -137,16 +178,21 @@
       # `attribute 'ancestry' missing`; `fromDerivation` is cl-nix-forge's own
       # adapter for exactly that -- a package it did not build and about which
       # it can assume nothing. cl-regex-kit wraps cl-weave the same way.
-      lispDependencies =
-        ctx: [
-          (ctx.cl.fromDerivation { drv = cl-tty-kit.packages.${ctx.system}.cl-tty-kit; })
-          (ctx.cl.lispDerivation {
-            lispSystem = "cl-codec-kit";
-            version = ctx.cl.fromAsdSystem "${cl-codec-kit}/cl-codec-kit.asd";
-            src = cl-codec-kit;
-          })
-          cl-cli.packages.${ctx.system}.cl-cli
-        ];
+      lispDependencies = ctx: [
+        (ctx.cl.fromDerivation { drv = cl-tty-kit.packages.${ctx.system}.cl-tty-kit; })
+        (ctx.cl.lispDerivation {
+          lispSystem = "cl-codec-kit";
+          version = ctx.cl.fromAsdSystem "${cl-codec-kit}/cl-codec-kit.asd";
+          src = cl-codec-kit;
+        })
+        cl-cli.packages.${ctx.system}.cl-cli
+        (ctx.cl.lispDerivation {
+          pname = "cl-host-kit";
+          lispSystem = "cl-host-kit";
+          version = ctx.cl.fromAsdSystem "${cl-host-kit}/cl-host-kit.asd";
+          src = cl-host-kit;
+        })
+      ];
 
       # cl-weave is a dependency of `cl-cmatrix/test` only (see cl-cmatrix.asd),
       # so it is a CHECK dependency: it must not enter the library's closure.
@@ -180,5 +226,33 @@
       # gate, so the formatter and CI can never disagree about what
       # "formatted" means.
       treefmt.evalModule = treefmt-nix.lib.evalModule;
+
+      # `checks.coverage`, hence `nix build .#checks.<system>.coverage` and
+      # `nix flake check`. `cl.mkCoverageReport` owns the exact
+      # declaim/force-load/declaim SB-COVER sequence its own docs describe as
+      # load-bearing (get it subtly wrong by hand -- e.g. touch "cl-cmatrix"
+      # via any ASDF operation before that declaim, even transitively -- and
+      # every run reports zero coverage, silently), so it drives the check
+      # rather than a hand-rolled `mkScriptCheck` reimplementing the same
+      # dance. It has deliberately no threshold option of its own (see
+      # cl-nix-forge's checks.md "No minimum-coverage threshold" -- a
+      # percentage gate would mean scraping SB-COVER's HTML, which has no
+      # stability guarantee): it only makes the number visible. Enforcing an
+      # actual floor is scripts/coverage-entry.lisp's job, run as this
+      # ENTRYPOINT -- inside the same already-instrumented process, after
+      # MKCOVERAGEREPORT's own force-load, so it only has to load and run the
+      # test suite and read back CL-WEAVE:COVERAGE-STATISTICS. Its floor is
+      # 90% branch (nerima-lisp/.github's TEST_STANDARD.md number, already
+      # cleared) but only 80% expression, WITH REASONS -- see that file's own
+      # header comment before raising either number by editing this line
+      # alone; the 80% one is capped by real testability gaps, not inertia.
+      extraOutputs = ctx: {
+        checks.coverage = ctx.cl.mkCoverageReport {
+          drv = ctx.package;
+          systems = [ "cl-cmatrix" ];
+          entryPoint = "scripts/coverage-entry.lisp";
+          timeoutSeconds = 420;
+        };
+      };
     };
 }

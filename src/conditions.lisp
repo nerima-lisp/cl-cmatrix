@@ -10,27 +10,49 @@
   ()
   (:documentation "Base condition for every error CL-CMATRIX signals."))
 
-(define-condition invalid-dimensions (cl-cmatrix-error)
-  ((width :initarg :width :reader invalid-dimensions-width)
-   (height :initarg :height :reader invalid-dimensions-height))
-  (:report (lambda (condition stream)
-             (format stream "Matrix WIDTH and HEIGHT must be positive integers, got width ~S height ~S."
-                     (invalid-dimensions-width condition) (invalid-dimensions-height condition))))
-  (:documentation "Signaled by MAKE-MATRIX-STATE or MATRIX-RESIZE when WIDTH or
-HEIGHT is not a positive integer."))
+(defmacro define-cl-cmatrix-condition (name (&rest slot-specs)
+                                        (report-control &rest report-arg-forms) documentation)
+  "Define NAME as a CL-CMATRIX-ERROR subclass. Each element of SLOT-SPECS is
+(SLOT-NAME READER-NAME); SLOT-NAME becomes both the slot and its keyword
+:INITARG, and READER-NAME its :READER. REPORT-CONTROL and REPORT-ARG-FORMS
+build the :REPORT clause's FORMAT call, with CONDITION bound to the signaled
+condition. DOCUMENTATION becomes the condition's :DOCUMENTATION.
 
-(define-condition invalid-speed (cl-cmatrix-error)
-  ((speed :initarg :speed :reader invalid-speed-speed))
-  (:report (lambda (condition stream)
-             (format stream "Fall SPEED must be a positive real number, got ~S."
-                     (invalid-speed-speed condition))))
-  (:documentation "Signaled by MAKE-MATRIX-STATE when SPEED is not a positive
-real number."))
+Every condition CL-CMATRIX signals besides the CL-CMATRIX-ERROR base itself
+is defined through this macro, so adding one is a single form rather than
+hand-written :REPORT boilerplate."
+  `(define-condition ,name (cl-cmatrix-error)
+     (,@(loop for (slot reader) in slot-specs
+              collect `(,slot :initarg ,(intern (symbol-name slot) :keyword) :reader ,reader)))
+     (:report (lambda (condition stream)
+                (declare (ignorable condition))
+                (format stream ,report-control ,@report-arg-forms)))
+     (:documentation ,documentation)))
 
-(define-condition unknown-color-scheme (cl-cmatrix-error)
-  ((name :initarg :name :reader unknown-color-scheme-name))
-  (:report (lambda (condition stream)
-             (format stream "Unknown color scheme ~S. Known schemes: ~{~A~^, ~}."
-                     (unknown-color-scheme-name condition) (list-color-schemes))))
-  (:documentation "Signaled by MAKE-MATRIX-STATE when COLOR names no scheme
-registered in +COLOR-SCHEMES+. LIST-COLOR-SCHEMES names every valid choice."))
+(define-cl-cmatrix-condition invalid-dimensions
+    ((width invalid-dimensions-width) (height invalid-dimensions-height))
+    ("Matrix WIDTH and HEIGHT must be positive integers, got width ~S height ~S."
+     (invalid-dimensions-width condition) (invalid-dimensions-height condition))
+  "Signaled by MAKE-MATRIX-STATE or MATRIX-RESIZE when WIDTH or
+HEIGHT is not a positive integer.")
+
+(define-cl-cmatrix-condition invalid-speed
+    ((speed invalid-speed-speed))
+    ("Fall SPEED must be a positive real number, got ~S." (invalid-speed-speed condition))
+  "Signaled by MAKE-MATRIX-STATE when SPEED is not a positive
+real number.")
+
+(define-cl-cmatrix-condition unknown-color-scheme
+    ((name unknown-color-scheme-name))
+    ("Unknown color scheme ~S. Known schemes: ~{~A~^, ~}."
+     (unknown-color-scheme-name condition) (list-color-schemes))
+  "Signaled by MAKE-MATRIX-STATE when COLOR names no scheme
+registered in +COLOR-SCHEMES+, and is not :RAINBOW. LIST-COLOR-SCHEMES names
+every valid registered scheme.")
+
+(define-cl-cmatrix-condition unknown-charset
+    ((name unknown-charset-name))
+    ("Unknown charset ~S. Known charsets: ~{~A~^, ~}."
+     (unknown-charset-name condition) (list-charsets))
+  "Signaled by CHARSET-GLYPHS when NAME names no charset registered
+in +CHARSETS+. LIST-CHARSETS names every valid choice.")

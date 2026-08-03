@@ -30,7 +30,8 @@
           (snapshot-2 (%column-snapshot (%run-ticks 8 12 60))))
       (expect (equal snapshot-1 snapshot-2) :to-be-truthy)))
 
-  (it "a different seed reaches different column state (the seed is actually the source of the randomness)"
+  (it "a different seed reaches different column state (the seed is actually the source of
+the randomness)"
     (let ((snapshot-1 (%column-snapshot (%run-ticks 8 12 60 :seed 1)))
           (snapshot-2 (%column-snapshot (%run-ticks 8 12 60 :seed 2))))
       (expect (not (equal snapshot-1 snapshot-2)) :to-be-truthy)))

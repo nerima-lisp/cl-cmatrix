@@ -11,7 +11,9 @@
 
 (defstruct (matrix-state (:constructor %make-matrix-state) (:copier %copy-matrix-state))
   "The full state of a matrix-rain animation at one tick. COLUMNS is a
-SIMPLE-VECTOR of WIDTH COLUMN structures, one per screen column."
+SIMPLE-VECTOR of WIDTH COLUMN structures, one per screen column. BOLD, when
+true, renders every lit row bold rather than only the head (see
+MATRIX-CELL-STYLE)."
   (width 0 :type fixnum)
   (height 0 :type fixnum)
   (columns #() :type simple-vector)
@@ -19,6 +21,7 @@ SIMPLE-VECTOR of WIDTH COLUMN structures, one per screen column."
   (speed 1 :type real)
   (color :green :type keyword)
   (glyphs +default-glyphs+ :type simple-vector)
+  (bold nil :type boolean)
   (tick 0 :type fixnum))
 
 (defun %assert-dimensions (width height)
@@ -29,8 +32,13 @@ SIMPLE-VECTOR of WIDTH COLUMN structures, one per screen column."
   (unless (and (realp speed) (plusp speed))
     (error 'invalid-speed :speed speed)))
 
-(defun make-matrix-state (width height &key (speed 1) (color :green)
+(defun %default-speed () 1)
+(defun %default-color () :green)
+(defun %default-bold () nil)
+
+(defun make-matrix-state (width height &key (speed (%default-speed)) (color (%default-color))
                                              (glyphs +default-glyphs+)
+                                             (bold (%default-bold))
                                              (random-state (make-random-state t)))
   "Create a MATRIX-STATE of WIDTH by HEIGHT columns, each independently
 spawned from RANDOM-STATE (an actual CL random state object -- inject one
@@ -38,19 +46,21 @@ built by, e.g., SB-EXT:SEED-RANDOM-STATE for a reproducible run; the default
 is a nondeterministic one, matching CL:MAKE-RANDOM-STATE's own T argument).
 
 SPEED is a positive real fall-speed multiplier (default 1; larger values
-fall faster) and COLOR names one of LIST-COLOR-SCHEMES (default :GREEN).
-GLYPHS is the non-empty character set columns draw from (default
-+DEFAULT-GLYPHS+).
+fall faster) and COLOR names one of LIST-COLOR-SCHEMES, or :RAINBOW to draw
+each column from a different scheme (default :GREEN). GLYPHS is the
+non-empty character set columns draw from (default +DEFAULT-GLYPHS+). BOLD,
+when true, renders every lit row bold rather than only the head.
 
 Signals INVALID-DIMENSIONS when WIDTH or HEIGHT is not a positive integer,
 INVALID-SPEED when SPEED is not a positive real, and UNKNOWN-COLOR-SCHEME
-when COLOR names no registered scheme."
+when COLOR is neither a registered scheme nor :RAINBOW."
   (%assert-dimensions width height)
   (%assert-speed speed)
-  (%color-scheme-rgbs color) ; signals UNKNOWN-COLOR-SCHEME up front, before spawning columns
+  ;; Signals UNKNOWN-COLOR-SCHEME up front, before spawning columns.
+  (unless (color-choice-p color) (error 'unknown-color-scheme :name color))
   (%make-matrix-state
     :width width :height height :random-state random-state :speed speed
-    :color color :glyphs glyphs :tick 0
+    :color color :glyphs glyphs :bold bold :tick 0
     :columns (coerce (loop repeat width
                             collect (%spawn-column glyphs random-state speed))
                       'simple-vector)))
@@ -66,14 +76,16 @@ mutated in place by the random draws, as every CL random-state normally is."
          (random-state (matrix-state-random-state state))
          (speed (matrix-state-speed state))
          (height (matrix-state-height state))
-         (new-columns (map 'simple-vector
-                            (lambda (column)
-                              (%advance-column column glyphs random-state speed height))
-                            (matrix-state-columns state)))
-         (new-state (%copy-matrix-state state)))
-    (setf (matrix-state-columns new-state) new-columns
-          (matrix-state-tick new-state) (1+ (matrix-state-tick state)))
-    new-state))
+         (old-columns (matrix-state-columns state))
+         (new-columns (make-array (length old-columns))))
+    (dotimes (index (length old-columns))
+      (setf (svref new-columns index)
+            (%advance-column (svref old-columns index)
+                             glyphs random-state speed height)))
+    (let ((new-state (%copy-matrix-state state)))
+      (setf (matrix-state-columns new-state) new-columns
+            (matrix-state-tick new-state) (1+ (matrix-state-tick state)))
+      new-state)))
 
 (defun matrix-resize (state new-width new-height)
   "Return a new MATRIX-STATE reflowed to NEW-WIDTH by NEW-HEIGHT. Columns

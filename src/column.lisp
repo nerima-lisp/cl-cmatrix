@@ -12,13 +12,19 @@
 
 (in-package #:cl-cmatrix)
 
-(defparameter +min-trail-length+ 3
+(defun %min-trail-length () 3)
+
+(defparameter +min-trail-length+ (%min-trail-length)
   "The shortest trail a freshly spawned COLUMN may have.")
 
-(defparameter +max-trail-length+ 12
+(defun %max-trail-length () 12)
+
+(defparameter +max-trail-length+ (%max-trail-length)
   "The longest trail a freshly spawned COLUMN may have.")
 
-(defparameter +max-raw-interval+ 3
+(defun %max-raw-interval () 3)
+
+(defparameter +max-raw-interval+ (%max-raw-interval)
   "The upper bound (inclusive) of the ticks-per-row-advance a freshly spawned
 COLUMN draws before SPEED scaling is applied to it.")
 
@@ -70,21 +76,32 @@ drops does not all break the top edge in lockstep."
     (%make-column :interval interval :counter 0 :head head :length length
                   :glyphs (%make-glyph-ring length glyphs random-state))))
 
+(defun %column-fall-one-row (column glyphs random-state new-head)
+  "Return a new COLUMN with its head advanced to NEW-HEAD, painting a freshly
+drawn glyph into the ring-buffer row NEW-HEAD now occupies. The counter reset
+to 0 alongside HEAD is what starts the next INTERVAL-tick wait for the row
+after NEW-HEAD."
+  (let ((new-glyphs (copy-seq (column-glyphs column))))
+    (setf (svref new-glyphs (mod new-head (column-length column)))
+          (random-glyph glyphs random-state))
+    (%make-column :interval (column-interval column) :counter 0
+                  :head new-head :length (column-length column)
+                  :glyphs new-glyphs)))
+
 (defun %advance-column (column glyphs random-state speed height)
   "Advance COLUMN by one tick, returning a new COLUMN. Every HEIGHT+LENGTH
 rows-worth of ticks the column's whole trail has scrolled past the visible
-HEIGHT rows, and it respawns at the top via %SPAWN-COLUMN."
+HEIGHT rows, and it respawns at the top via %SPAWN-COLUMN. The three cases
+below are, in order: not yet time for this tick to move a row (just count
+it), time to move but the whole trail has now scrolled off HEIGHT (respawn),
+and time to move with the column still on screen (paint the new head row)."
   (let ((counter (1+ (column-counter column))))
-    (if (< counter (column-interval column))
-        (%make-column :interval (column-interval column) :counter counter
-                      :head (column-head column) :length (column-length column)
-                      :glyphs (column-glyphs column))
-        (let ((new-head (1+ (column-head column))))
-          (if (>= new-head (+ height (column-length column)))
-              (%spawn-column glyphs random-state speed)
-              (let ((new-glyphs (copy-seq (column-glyphs column))))
-                (setf (svref new-glyphs (mod new-head (column-length column)))
-                      (random-glyph glyphs random-state))
-                (%make-column :interval (column-interval column) :counter 0
-                              :head new-head :length (column-length column)
-                              :glyphs new-glyphs)))))))
+    (cond
+      ((< counter (column-interval column))
+       (%make-column :interval (column-interval column) :counter counter
+                     :head (column-head column) :length (column-length column)
+                     :glyphs (column-glyphs column)))
+      ((>= (1+ (column-head column)) (+ height (column-length column)))
+       (%spawn-column glyphs random-state speed))
+      (t
+       (%column-fall-one-row column glyphs random-state (1+ (column-head column)))))))

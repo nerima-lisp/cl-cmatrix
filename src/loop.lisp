@@ -4,19 +4,26 @@
 ;;;; examples/renderer-loop.lisp and examples/event-loop.lisp establish: a
 ;;;; pure state-advance function (MATRIX-ADVANCE, in state.lisp) stays
 ;;;; entirely separate from the thin loop that touches a real terminal. This
-;;;; file is that thin loop -- polling the terminal size, polling for a quit
-;;;; key, and driving CL-TTY-KIT:TICK-LOOP-RUN-REALTIME -- plus the small
-;;;; pieces of it (QUIT-KEY-CHARACTER-P, POLL-QUIT-KEY, RUN-STATE-ADVANCE)
-;;;; that take their I/O as parameters rather than reaching for a live
-;;;; terminal, so tests can drive them against a STRING-INPUT-STREAM and a
-;;;; stubbed terminal-size function instead of a real tty.
+;;;; file is that thin loop, split the same way CL-TTY-KIT:
+;;;; TICK-LOOP-RUN-REALTIME's own :POLL argument (added in cl-tty-kit v1.4.0)
+;;;; now expects it to be: RUN-STATE-POLL observes the terminal (size, quit
+;;;; key) ahead of every tick, and RUN-STATE-ADVANCE only steps
+;;;; MATRIX-ADVANCE. QUIT-KEY-CHARACTER-P, POLL-QUIT-KEY and POLL-QUIT-KEY-CPS
+;;;; take their I/O as parameters rather than reaching for a live terminal, so
+;;;; tests can drive them against a STRING-INPUT-STREAM and a stubbed
+;;;; terminal-size function instead of a real tty.
 
 (in-package #:cl-cmatrix)
 
-(defparameter +default-fps+ 30
+(defun %default-fps () 30)
+
+(defparameter +default-fps+ (%default-fps)
   "Default tick rate, in ticks per second, for RUN-MATRIX.")
 
-(defparameter +quit-characters+ (list #\q #\Q #\Escape)
+(defun %build-quit-characters ()
+  (list #\q #\Q #\Escape))
+
+(defparameter +quit-characters+ (%build-quit-characters)
   "Raw characters that stop RUN-MATRIX by cmatrix convention (q/Q) or
 terminal convention (Escape). Ctrl-C is matched separately, by character
 code: raw mode clears ISIG (see cl-tty-kit's raw-mode-sbcl.lisp), so it
@@ -28,6 +35,23 @@ arrives as the raw ETX byte rather than as a SIGINT.")
   (or (member character +quit-characters+ :test #'char=)
       (= (char-code character) 3)))
 
+(defun poll-quit-key-cps (stream on-quit on-continue)
+  "Consume every character currently available on STREAM without blocking, in
+continuation-passing style: call ON-QUIT with the offending character the
+moment one satisfies QUIT-KEY-CHARACTER-P (the rest of STREAM's buffered
+input, if any, is left consumed either way, since none of it is looked at
+again), or call ON-CONTINUE with no arguments once STREAM is exhausted
+without one. This is POLL-QUIT-KEY's own implementation; it is exposed
+directly for callers that want the actual quit character rather than only a
+boolean -- for example to log which of q/Q/Escape/Ctrl-C ended a run -- and
+for CL-WEAVE's WITH-CONTINUATION-RESULT, which drives a CPS function exactly
+this shape."
+  (loop while (listen stream)
+        do (let ((character (read-char stream)))
+             (when (quit-key-character-p character)
+               (return-from poll-quit-key-cps (funcall on-quit character)))))
+  (funcall on-continue))
+
 (defun poll-quit-key (stream)
   "Consume every character currently available on STREAM without blocking,
 returning true as soon as one of them satisfies QUIT-KEY-CHARACTER-P (the
@@ -35,9 +59,9 @@ rest, if any, are still consumed, since none of them will be looked at
 again). Used instead of a blocking read because a real-time animation loop
 cannot afford to wait on a key that may never come. Works against any
 character stream -- including a STRING-INPUT-STREAM in a test -- not only a
-live terminal."
-  (loop while (listen stream)
-        thereis (quit-key-character-p (read-char stream))))
+live terminal. A thin direct-style wrapper over POLL-QUIT-KEY-CPS for every
+caller that only needs the yes/no answer."
+  (poll-quit-key-cps stream (constantly t) (constantly nil)))
 
 (defstruct (run-state (:constructor make-run-state))
   "The mutable driver state RUN-MATRIX threads through
@@ -73,19 +97,30 @@ MATRIX-STATE's randomness is injected rather than read from a global."
         (matrix-resize matrix columns rows)
         matrix)))
 
-(defun run-state-advance (run-state &key (fd 0) (terminal-size-fn #'terminal-size))
-  "Advance RUN-STATE by one tick: reflow for the current terminal size (via
-TERMINAL-SIZE-FN), advance the underlying MATRIX-STATE, resize the renderer
-to match, and record whether a quit key has arrived on INPUT-STREAM. Returns
-RUN-STATE, mutated in place -- this function, unlike MATRIX-ADVANCE, is the
-impure side of the split and is never used by the deterministic bounded-tick
-tests."
+(defun %default-fd () 0)
+
+(defun run-state-poll (run-state &key (fd (%default-fd)) (terminal-size-fn #'terminal-size))
+  "Observe the real terminal ahead of RUN-STATE's next tick: reflow for the
+current size (via TERMINAL-SIZE-FN), resize the renderer to match, and record
+whether a quit key has arrived on INPUT-STREAM. Returns RUN-STATE, mutated in
+place -- this is the POLL half of the poll/advance split
+CL-TTY-KIT:TICK-LOOP-RUN-REALTIME's :POLL argument drives, called once before
+each tick's RUN-STATE-ADVANCE; never used by the deterministic bounded-tick
+tests, which only exercise RUN-STATE-ADVANCE."
   (setf (run-state-matrix run-state)
         (%poll-resize (run-state-matrix run-state) fd terminal-size-fn))
-  (setf (run-state-matrix run-state) (matrix-advance (run-state-matrix run-state)))
   (%sync-renderer-size run-state)
   (when (poll-quit-key (run-state-input-stream run-state))
     (setf (run-state-quitp run-state) t))
+  run-state)
+
+(defun run-state-advance (run-state)
+  "Advance RUN-STATE's underlying MATRIX-STATE by one tick, returning
+RUN-STATE mutated in place. The pure-given-RANDOM-STATE half of the
+poll/advance split: terminal observation (resize, quit-key) is
+RUN-STATE-POLL's job instead, run ahead of this one every tick by
+CL-TTY-KIT:TICK-LOOP-RUN-REALTIME's :POLL argument."
+  (setf (run-state-matrix run-state) (matrix-advance (run-state-matrix run-state)))
   run-state)
 
 (defun run-state-render (run-state)
@@ -96,7 +131,29 @@ return the diffed ANSI frame string for this tick."
     (matrix-draw (renderer-screen renderer) (run-state-matrix run-state))
     (renderer-render renderer)))
 
-(defun run-matrix (&key (speed 1) (color :green) (stream *standard-output*)
+(defun %terminal-dimensions (columns rows)
+  "Return the WIDTH and HEIGHT RUN-MATRIX should build its MATRIX-STATE at,
+given the two values CL-TTY-KIT:TERMINAL-SIZE reports (each NIL when the
+size could not be determined): COLUMNS/ROWS themselves when both are
+present, else the classic 80x24 fallback."
+  (values (or columns 80) (or rows 24)))
+
+(defun %make-initial-run-state (width height speed color glyphs bold random-state input-stream)
+  "Return the RUN-STATE RUN-MATRIX drives: a WIDTH by HEIGHT MATRIX-STATE
+paired with a matching CL-TTY-KIT renderer, not yet advanced or rendered.
+Pure given RANDOM-STATE, like MAKE-MATRIX-STATE itself -- the only impure
+piece of RUN-MATRIX's setup is polling the terminal size for WIDTH/HEIGHT in
+the first place (see %TERMINAL-DIMENSIONS), which this function takes
+already resolved rather than reaching for itself."
+  (let ((matrix (make-matrix-state width height :speed speed :color color
+                                    :glyphs glyphs :bold bold
+                                    :random-state random-state))
+        (renderer (make-renderer width height)))
+    (make-run-state :matrix matrix :renderer renderer
+                     :quitp nil :input-stream input-stream)))
+
+(defun run-matrix (&key (speed 1) (color :green) (glyphs +default-glyphs+) (bold nil)
+                        (stream *standard-output*)
                         (input-stream *standard-input*) (fd 0)
                         (fps +default-fps+) (random-state (make-random-state t)))
   "Run the full-screen matrix-rain animation on STREAM until a quit key (q,
@@ -109,26 +166,23 @@ arriving before raw mode has taken effect, or delivered as a real signal
 rather than a raw byte) is treated the same as any other quit: caught here
 so the run ends cleanly rather than dropping into the debugger.
 
-SPEED and COLOR are as in MAKE-MATRIX-STATE. FPS is the target tick rate
-(default 30). RANDOM-STATE seeds the fall-timing and glyph randomness;
-supply a fixed seed (e.g. one built by SB-EXT:SEED-RANDOM-STATE) for a
-reproducible run. Returns the final MATRIX-STATE."
+SPEED, COLOR, GLYPHS, and BOLD are as in MAKE-MATRIX-STATE. FPS is the
+target tick rate (default 30). RANDOM-STATE seeds the fall-timing and glyph
+randomness; supply a fixed seed (e.g. one built by SB-EXT:SEED-RANDOM-STATE)
+for a reproducible run. Returns the final MATRIX-STATE."
   (multiple-value-bind (columns rows) (terminal-size fd)
-    (let* ((width (or columns 80))
-           (height (or rows 24))
-           (matrix (make-matrix-state width height :speed speed :color color
-                                       :random-state random-state))
-           (renderer (make-renderer width height))
-           (run-state (make-run-state :matrix matrix :renderer renderer
-                                       :quitp nil :input-stream input-stream)))
-      (with-terminal-session (out :stream stream :fd fd :raw-mode t
-                                   :alternate-screen t :hide-cursor t)
-        (handler-case
-            (tick-loop-run-realtime
-             run-state
-             (lambda (state) (run-state-advance state :fd fd))
-             #'run-state-render
-             #'run-state-quitp
-             :stream out :interval (/ 1 fps))
-          (sb-sys:interactive-interrupt () nil)))
-      (run-state-matrix run-state))))
+    (multiple-value-bind (width height) (%terminal-dimensions columns rows)
+      (let ((run-state (%make-initial-run-state width height speed color glyphs bold
+                                                  random-state input-stream)))
+        (with-terminal-session (out :stream stream :fd fd :raw-mode t
+                                     :alternate-screen t :hide-cursor t)
+          (handler-case
+              (tick-loop-run-realtime
+               run-state
+               #'run-state-advance
+               #'run-state-render
+               #'run-state-quitp
+               :stream out :interval (/ 1 fps)
+               :poll (lambda (state) (run-state-poll state :fd fd)))
+            (sb-sys:interactive-interrupt () nil)))
+        (run-state-matrix run-state)))))

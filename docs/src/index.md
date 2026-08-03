@@ -20,4 +20,8 @@ relies on.
 
 Start with [Getting Started](getting-started.md), then see the
 [API Reference](reference/api.md) for `cl-cmatrix:run-matrix` and the rest of
-the public surface.
+the public surface. [Conditions](reference/conditions.md) documents every
+error `cl-cmatrix` signals, [Architecture](reference/architecture.md)
+explains how the pieces fit together, and
+[Compatibility](reference/compatibility.md) covers SBCL/platform
+requirements.

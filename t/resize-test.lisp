@@ -43,8 +43,21 @@
       (expect (equalp (matrix-state-columns state-1) (matrix-state-columns state-2))
               :to-be-truthy)))
 
-  (it "signals INVALID-DIMENSIONS for a non-positive new width or height"
+  (it-each ((0 4) (4 -1))
+      "signals INVALID-DIMENSIONS for a new width ~A height ~A"
+      (new-width new-height)
     (let ((state (make-matrix-state 4 4 :random-state (sb-ext:seed-random-state 14))))
-      (with-soft-assertions
-        (expect (signals (matrix-resize state 0 4) 'invalid-dimensions) :to-be-truthy)
-        (expect (signals (matrix-resize state 4 -1) 'invalid-dimensions) :to-be-truthy)))))
+      (expect (signals invalid-dimensions (matrix-resize state new-width new-height))
+              :to-be-truthy)))
+
+  (it-property "always yields a MATRIX-STATE of exactly the requested new dimensions, for any
+valid starting and target size"
+      ((width (gen-integer :min 1 :max 40))
+       (height (gen-integer :min 1 :max 40))
+       (new-width (gen-integer :min 1 :max 40))
+       (new-height (gen-integer :min 1 :max 40)))
+    (let* ((state (make-matrix-state width height :random-state (sb-ext:seed-random-state 99)))
+           (resized (matrix-resize state new-width new-height)))
+      (expect (= (matrix-state-width resized) new-width) :to-be-truthy)
+      (expect (= (matrix-state-height resized) new-height) :to-be-truthy)
+      (expect (= (length (matrix-state-columns resized)) new-width) :to-be-truthy))))

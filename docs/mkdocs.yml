@@ -1,20 +1,58 @@
+# cl-cmatrix documentation -- MkDocs + Material configuration.
+#
+# Build:   mkdocs build -f docs/mkdocs.yml --strict
+# Serve:   mkdocs serve  -f docs/mkdocs.yml
+#
+# The flake builds this same config offline through cl-nix-forge's
+# `mkPackageFlake` `docs.root` (flake.nix), also published as `checks.docs`.
+
 site_name: cl-cmatrix
 site_description: A Matrix-style digital rain terminal screensaver for SBCL.
 site_url: https://nerima-lisp.github.io/cl-cmatrix/
+
 repo_url: https://github.com/nerima-lisp/cl-cmatrix
 repo_name: nerima-lisp/cl-cmatrix
 edit_uri: edit/main/docs/src/
 
 docs_dir: src
+# Only used by a bare `mkdocs build`; the flake passes its own --site-dir.
+site_dir: ../site
+
+# The flake's docs build passes --strict as well. Declaring it here too means
+# `mkdocs serve` applies the same gate, so there is no invocation path that
+# silently tolerates a broken link. Use `mkdocs serve --no-strict` while
+# drafting.
+strict: true
+
+# --strict promotes WARNINGs to failures, and only WARNINGs. Three checks
+# this file depends on are INFO by default, which --strict alone does not
+# fail on: raising them here is what makes "every page appears in nav" and
+# "no dead link or anchor" enforceable rather than aspirational.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+
+copyright: Copyright &copy; takeokunn -- MIT License
 
 theme:
   name: material
+  language: en
+  favicon: assets/favicon.svg
+  icon:
+    repo: fontawesome/brands/github
   features:
     - navigation.sections
     - navigation.top
+    - navigation.indexes
     - content.code.copy
     - content.action.edit
     - search.highlight
+    - toc.follow
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -29,19 +67,56 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
 
+extra:
+  generator: false
+
+# Only `search`: anything else needs an extra package in the Nix sandbox that
+# builds this site, for no benefit this project has needed yet.
+plugins:
+  - search
+
 markdown_extensions:
   - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
   - toc:
       permalink: true
+      title: On this page
+  - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true
-  - pymdownx.superfences
-  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
 
 # Every page under docs/src/ must appear here: --strict fails the build on an
-# unlisted page. See PACKAGE_STANDARD.md / DOCS_STANDARD.md.
+# unlisted page. That is deliberate, so the nav cannot silently fall behind.
+#
+# No Guide section: cl-cmatrix is a single small binary with no prose topics
+# beyond what getting-started.md and reference/api.md already cover. Adding
+# an empty section would just be a heading with nothing under it.
 nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Reference:
       - API: reference/api.md
+      - Conditions: reference/conditions.md
+      - Architecture: reference/architecture.md
+      - Compatibility: reference/compatibility.md
+  - Project:
+      - Development: project/development.md
+
+not_in_nav: |
+  notes/

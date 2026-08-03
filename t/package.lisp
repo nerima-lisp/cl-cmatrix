@@ -6,10 +6,24 @@
   (:import-from #:cl-weave
    ;; Registration and assertions
    #:it #:expect #:signals #:run-all
+   ;; Table tests and fixtures
+   #:it-each #:before-each
    ;; Soft (all-failures-collected) assertions
-   #:with-soft-assertions)
+   #:with-soft-assertions
+   ;; CPS continuation helpers
+   #:with-continuation-result
+   ;; Mutation testing
+   #:run-mutations #:assert-mutation-score
+   ;; Subprocess isolation, for code that really exits the process
+   #:it-isolated
+   ;; Property-based testing: generated cases plus automatic shrinking on
+   ;; failure, for invariants that must hold across a whole input space
+   ;; rather than only the hand-picked examples the other IT cases cover.
+   #:it-property #:gen-integer #:gen-member)
   (:import-from #:cl-cmatrix/cli
-   #:make-cmatrix-app)
+   #:make-cmatrix-app
+   #:main
+   #:image-entry-point)
   (:import-from #:cl-cli
    #:parse-argv
    #:run-app
@@ -22,6 +36,7 @@
    #:make-screen
    #:screen-cell
    #:cell-char
+   #:cell-style
    #:make-renderer
    #:renderer-width
    #:renderer-height)
