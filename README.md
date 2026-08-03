@@ -50,7 +50,7 @@ As a library, from another flake:
 ```nix
 # flake.nix
 inputs.cl-cmatrix = {
-  url = "github:nerima-lisp/cl-cmatrix/v0.1.0";
+  url = "github:nerima-lisp/cl-cmatrix/v0.2.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
