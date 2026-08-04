@@ -60,44 +60,26 @@
     };
 
     # Declarative CLI parsing plus --help/--version scaffolding, used by
-    # src/cli.lisp.
+    # src/cli.lisp. Also cl-cmatrix's ONLY route to cl-host-kit (QUIT, GETCWD
+    # and TRUENAMIZE, used by src/cli.lisp and scripts/coverage-entry.lisp in
+    # place of ASDF's own bundled UIOP): cl-cli's own `:depends-on` names
+    # "cl-host-kit" too, and unlike cl-tty-kit below, cl-cli's package is
+    # passed to `lispDependencies` PLAIN rather than through
+    # `ctx.cl.fromDerivation` -- see that comment for why the distinction
+    # matters -- so it carries a real `passthru.ancestry` cl-nix-forge's
+    # dependency walk reads. cl-host-kit's own registry entry from inside
+    # cl-cli's closure is therefore already reachable from here; declaring it
+    # AGAIN as this flake's own separate input and `lispDerivation` call
+    # (tried on 2026-08-03, reverted 2026-08-04) builds a second "cl-host-kit"
+    # with a different `cl-nix-forge` dedup key -- it is keyed on the whole
+    # build context (implementation, dependency closure, CL_SOURCE_REGISTRY),
+    # not source-tree identity alone -- which `mkExecutable`'s `installSource`
+    # then refuses outright: "cl-host-kit names more than one of them". Never
+    # observed locally because this machine only ever checks aarch64-darwin;
+    # only surfaced once CI first ran this flake on x86_64-linux.
     cl-cli = {
       url = "github:nerima-lisp/cl-cli/v1.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    # QUIT, GETCWD and TRUENAMIZE, used by src/cli.lisp and
-    # scripts/coverage-entry.lisp in place of ASDF's own bundled UIOP.
-    # `flake = false`, same reasoning as cl-codec-kit above: cl-host-kit has
-    # not cut a release declaring aarch64-darwin (its flake's `packages`
-    # covers x86_64-linux only), so reading `packages.${system}` would fail
-    # evaluation on this development machine. Its own :DEPENDS-ON is just
-    # `sb-posix`, an SBCL-bundled contrib, so building it as a source tree
-    # here costs nothing extra.
-    #
-    # PINNED TO v0.2.5, NOT THE LATEST v0.3.0 -- tried and reverted 2026-08-03.
-    # Since cl-cli's 2026-08-01 uiop->cl-host-kit migration, `cl-cli` v1.3.0's
-    # OWN `:depends-on` names "cl-host-kit" too (a REAL runtime dependency,
-    # not test-only), and cl-cli's own flake pins it to v0.2.5, `flake =
-    # false`, the exact same shape as here. cl-nix-forge's `mkExecutable`
-    # `installSource` step dedupes a shared sibling dependency by SOURCE-TREE
-    # IDENTITY (same commit -> same Nix store path -> recognized as "the same
-    # dependency", installed once) -- not by name or version number alone.
-    # Bumping only this file's pin to v0.3.0 makes cl-cmatrix's own
-    # cl-host-kit a DIFFERENT source tree than the v0.2.5 cl-cli already
-    # bundles into its own closure, and two different trees both named
-    # "cl-host-kit" is exactly what `installSource` refuses ("cl-host-kit
-    # names more than one of them") -- confirmed by reproducing it with both
-    # a plain `packages.${system}` reference AND a `flake = false` +
-    # `lispDerivation` reference at v0.3.0, ruling out the consumption
-    # mechanism as the cause. This pin can only move to v0.3.0 once cl-cli
-    # itself bumps its own cl-host-kit pin to match -- moving it here alone
-    # trades a verified, tested pin for an unverified guess, exactly what
-    # cl-cli's own flake.nix warns against doing to ITS cl-boundary-kit pin
-    # for the identical reason.
-    cl-host-kit = {
-      url = "github:nerima-lisp/cl-host-kit/v0.2.5";
-      flake = false;
     };
 
     treefmt-nix = {
@@ -115,7 +97,6 @@
       cl-tty-kit,
       cl-codec-kit,
       cl-cli,
-      cl-host-kit,
       treefmt-nix,
     }:
     let
@@ -172,12 +153,15 @@
       # `fromDerivation` on cl-tty-kit, plain on cl-cli. The two siblings are
       # built by different machinery: cl-cli's flake is a `mkPackageFlake`
       # adopter, so its package carries the `passthru.ancestry` cl-nix-forge's
-      # deduplicating registry walk reads, while cl-tty-kit still builds its
-      # own package with nixpkgs' `pkgs.sbcl.buildASDFSystem`, which does not.
-      # Passing the latter straight through fails evaluation with
-      # `attribute 'ancestry' missing`; `fromDerivation` is cl-nix-forge's own
-      # adapter for exactly that -- a package it did not build and about which
-      # it can assume nothing. cl-regex-kit wraps cl-weave the same way.
+      # deduplicating registry walk reads (which is also how cl-host-kit,
+      # cl-cli's own dependency, reaches this build without a separate entry
+      # here -- see cl-cli's own input comment above), while cl-tty-kit still
+      # builds its own package with nixpkgs' `pkgs.sbcl.buildASDFSystem`,
+      # which does not. Passing the latter straight through fails evaluation
+      # with `attribute 'ancestry' missing`; `fromDerivation` is
+      # cl-nix-forge's own adapter for exactly that -- a package it did not
+      # build and about which it can assume nothing. cl-regex-kit wraps
+      # cl-weave the same way.
       lispDependencies = ctx: [
         (ctx.cl.fromDerivation { drv = cl-tty-kit.packages.${ctx.system}.cl-tty-kit; })
         (ctx.cl.lispDerivation {
@@ -186,12 +170,6 @@
           src = cl-codec-kit;
         })
         cl-cli.packages.${ctx.system}.cl-cli
-        (ctx.cl.lispDerivation {
-          pname = "cl-host-kit";
-          lispSystem = "cl-host-kit";
-          version = ctx.cl.fromAsdSystem "${cl-host-kit}/cl-host-kit.asd";
-          src = cl-host-kit;
-        })
       ];
 
       # cl-weave is a dependency of `cl-cmatrix/test` only (see cl-cmatrix.asd),
