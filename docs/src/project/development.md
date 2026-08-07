@@ -70,6 +70,32 @@ body is read live from `src/column.lisp` on every run, never copied into the
 test file, so there is nothing here to fall out of sync with the real
 implementation.
 
+### Informational benchmarks
+
+The benchmark suite measures matrix advancement and rendering without making
+the run a pass/fail gate. It writes tab-separated results to
+`BENCHMARK_OUTPUT` and one log per child process under `BENCHMARK_LOG_DIR`.
+Keep those paths outside the repository when running locally:
+
+```sh
+nix develop --command sh -c \
+  'BENCHMARK_PROCESSES=1 \
+   BENCHMARK_TICKS=1000 \
+   BENCHMARK_WARMUP=100 \
+   BENCHMARK_SAMPLES=5 \
+   BENCHMARK_SIZES=80x24 \
+   BENCHMARK_OUTPUT=/tmp/cl-cmatrix-benchmark.tsv \
+   BENCHMARK_LOG_DIR=/tmp/cl-cmatrix-benchmark-logs \
+   ./scripts/benchmark-suite.sh'
+```
+
+Use comma-separated values in `BENCHMARK_SIZES` to measure multiple matrix
+sizes. `BENCHMARK_PROCESSES`, `BENCHMARK_TICKS`, `BENCHMARK_WARMUP`, and
+`BENCHMARK_SAMPLES` control process count and sampling volume; the suite also
+accepts `BENCHMARK_TIMEOUT_SECONDS` for the per-process timeout. The underlying
+runner reports matrix advance, dirty rendering, and ANSI encoding workloads;
+the suite records the matrix-advance and dirty-render rows in its TSV output.
+
 ### Coverage
 
 ```sh

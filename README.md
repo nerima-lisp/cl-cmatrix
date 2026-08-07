@@ -71,6 +71,7 @@ delivered binary, not the ASDF system.
 - [Conditions](https://nerima-lisp.github.io/cl-cmatrix/reference/conditions/)
 - [Architecture](https://nerima-lisp.github.io/cl-cmatrix/reference/architecture/)
 - [Compatibility](https://nerima-lisp.github.io/cl-cmatrix/reference/compatibility/)
+- [Development](https://nerima-lisp.github.io/cl-cmatrix/project/development/)
 
 ## Development
 
@@ -81,6 +82,11 @@ nix run .#test       # run the test suite
 nix flake check      # tests + formatting + docs, the same gate CI uses
 nix fmt              # format Nix sources (treefmt)
 ```
+
+For informational performance measurements, see the
+[development benchmark instructions](https://nerima-lisp.github.io/cl-cmatrix/project/development/#informational-benchmarks).
+The benchmark writes tab-separated results and does not enforce a performance
+threshold.
 
 Tests live in `t/` and run under [cl-weave](https://github.com/nerima-lisp/cl-weave),
 the org's test framework. Fall timing, glyph choice, and reset are all routed
