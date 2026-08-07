@@ -87,35 +87,41 @@ Options:~%\
        (lambda (ticks)
          (dotimes (index ticks)
            (declare (ignore index))
-           (cl-cmatrix:matrix-advance state))
+           (setf state (cl-cmatrix:matrix-advance state)))
          (values state nil)))
       (:advance-and-dirty-render
-       (let ((screen
-               (cl-tty-kit:make-screen
-                (options-width options)
-                (options-height options))))
+       (let* ((renderer
+                (cl-tty-kit:make-renderer
+                 (options-width options)
+                 (options-height options)))
+              (context (cl-cmatrix:make-render-context)))
          (lambda (ticks)
            (dotimes (index ticks)
              (declare (ignore index))
-             (cl-cmatrix:matrix-advance state)
-             (cl-cmatrix::matrix-draw-dirty screen state))
-           (values state screen))))
+             (setf state (cl-cmatrix:matrix-advance state))
+             (cl-tty-kit:renderer-clear renderer)
+             (cl-cmatrix:matrix-draw
+              (cl-tty-kit:renderer-screen renderer)
+              state
+              context))
+           (values state (cl-tty-kit:renderer-screen renderer)))))
       (:advance-dirty-render-and-ansi-encode
        (let* ((renderer
                 (cl-tty-kit:make-renderer
                  (options-width options)
                  (options-height options)))
               (run-state
-                (cl-cmatrix::make-run-state
+                (cl-cmatrix:make-run-state
                  :matrix state
-                 :renderer renderer))
-              (sink (make-broadcast-stream)))
+                 :renderer renderer)))
          (lambda (ticks)
            (dotimes (index ticks)
              (declare (ignore index))
-             (cl-cmatrix:matrix-advance state)
-             (cl-cmatrix::run-state-render run-state sink))
-           (values state (cl-tty-kit:renderer-screen renderer))))))))
+             (cl-cmatrix:run-state-advance run-state)
+             (cl-cmatrix:run-state-render run-state))
+           (values
+            (cl-cmatrix:run-state-matrix run-state)
+            (cl-tty-kit:renderer-screen renderer))))))))
 
 (defun measure-sample (workload options)
   (let ((runner (make-runner workload options))
