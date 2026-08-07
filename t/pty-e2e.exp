@@ -1,0 +1,101 @@
+#!/usr/bin/env expect
+
+set timeout 20
+set binary [lindex $argv 0]
+
+if {[llength $argv] != 1} {
+    puts stderr "usage: pty-e2e.exp /path/to/cl-cmatrix"
+    exit 2
+}
+
+set env(TERM) "xterm-256color"
+set enter_alt "\033\[?1049h"
+set hide_cursor "\033\[?25l"
+set show_cursor "\033\[?25h"
+set leave_alt "\033\[?1049l"
+
+proc fail {message transcript} {
+    catch {log_file}
+    puts stderr "FAIL: $message"
+    if {[file exists $transcript]} {
+        puts stderr "--- PTY transcript: $transcript ---"
+        set channel [open $transcript r]
+        fconfigure $channel -translation binary
+        puts -nonewline stderr [read $channel]
+        close $channel
+        puts stderr "\n--- end PTY transcript ---"
+    }
+    exit 1
+}
+
+proc expect_sequence {label sequence transcript} {
+    expect {
+        -exact $sequence { return }
+        timeout { fail "timed out waiting for $label" $transcript }
+        eof { fail "EOF before $label" $transcript }
+    }
+}
+
+proc expect_clean_exit {label transcript} {
+    expect {
+        eof { }
+        timeout { fail "$label did not exit before timeout" $transcript }
+    }
+    set status [wait]
+    if {[lindex $status 2] != 0 || [lindex $status 3] != 0} {
+        fail "$label exited abnormally: $status" $transcript
+    }
+}
+
+set raw_transcript [file join $env(TMPDIR) "cl-cmatrix-pty-raw.transcript"]
+log_file -noappend $raw_transcript
+spawn -noecho sh -c {
+    stty rows 24 cols 80
+    before=$(stty -g)
+    "$1" --fps 1 --seed 1
+    rc=$?
+    # PENDIN is kernel state set while canonical input is restored, not a user setting.
+    after=$(stty -g)
+    normalize_termios() {
+        printf '%s\n' "$1" | perl -F: -lane '$F[3] = sprintf "%x", hex($F[3]) & ~0x20000000; print join ":", @F'
+    }
+    if [ "$(normalize_termios "$before")" = "$(normalize_termios "$after")" ]; then
+        same=1
+    else
+        same=0
+        printf '\r\n__PTY_TERMIOS_BEFORE__ %s\r\n__PTY_TERMIOS_AFTER__ %s\r\n' "$before" "$after"
+    fi
+    printf '\r\n__PTY_RAW_RESULT__ rc=%s same=%s\r\n' "$rc" "$same"
+    exit "$rc"
+} sh $binary
+expect_sequence "alternate-screen entry" $enter_alt $raw_transcript
+expect_sequence "cursor hide" $hide_cursor $raw_transcript
+send -- "q"
+expect_sequence "cursor restore" $show_cursor $raw_transcript
+expect_sequence "alternate-screen exit" $leave_alt $raw_transcript
+expect {
+    -re {__PTY_RAW_RESULT__ rc=0 same=1} { }
+    -re {__PTY_RAW_RESULT__ rc=([^ ]+) same=([^\r\n]+)} {
+        fail "raw q result was rc=$expect_out(1,string), termios_equal=$expect_out(2,string)" $raw_transcript
+    }
+    timeout { fail "raw q result marker was not emitted" $raw_transcript }
+    eof { fail "EOF before raw q result marker" $raw_transcript }
+}
+expect_clean_exit "raw q case" $raw_transcript
+log_file
+file delete -force $raw_transcript
+puts "PASS: raw q exits 0 and restores termios"
+
+set signal_transcript [file join $env(TMPDIR) "cl-cmatrix-pty-sigint.transcript"]
+log_file -noappend $signal_transcript
+spawn -noecho sh -c {stty rows 24 cols 80; exec "$1" --fps 1 --seed 1} sh $binary
+expect_sequence "alternate-screen entry" $enter_alt $signal_transcript
+expect_sequence "cursor hide" $hide_cursor $signal_transcript
+exec kill -INT [exp_pid]
+expect_sequence "cursor restore after SIGINT" $show_cursor $signal_transcript
+expect_sequence "alternate-screen exit after SIGINT" $leave_alt $signal_transcript
+expect_clean_exit "SIGINT case" $signal_transcript
+log_file
+file delete -force $signal_transcript
+puts "PASS: SIGINT cleanup order is enter-alt, hide, show, leave-alt; exit 0"
+puts "2 passed, 0 failed, 0 skipped"
