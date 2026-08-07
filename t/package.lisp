@@ -1,48 +1,50 @@
 ;;;; t/package.lisp
 (defpackage #:cl-cmatrix/test
   (:use #:cl #:cl-cmatrix)
+  (:import-from #:cl-concurrent-kit
+                #:with-executor)
   ;; DESCRIBE clashes with CL:DESCRIBE, so shadow-import cl-weave's.
   (:shadowing-import-from #:cl-weave #:describe)
   (:import-from #:cl-weave
-   ;; Registration and assertions
-   #:it #:expect #:signals #:run-all
-   ;; Table tests and fixtures
-   #:it-each #:before-each
-   ;; Soft (all-failures-collected) assertions
-   #:with-soft-assertions
-   ;; CPS continuation helpers
-   #:with-continuation-result
-   ;; Mutation testing
-   #:run-mutations #:assert-mutation-score
-   ;; Subprocess isolation, for code that really exits the process
-   #:it-isolated
-   ;; Property-based testing: generated cases plus automatic shrinking on
-   ;; failure, for invariants that must hold across a whole input space
-   ;; rather than only the hand-picked examples the other IT cases cover.
-   #:it-property #:gen-integer #:gen-member #:gen-state-machine)
+                ;; Registration and assertions
+                #:it #:expect #:signals #:run-all
+                ;; Table tests and fixtures
+                #:it-each #:before-each
+                ;; Soft (all-failures-collected) assertions
+                #:with-soft-assertions
+                ;; CPS continuation helpers
+                #:with-continuation-result
+                ;; Mutation testing
+                #:run-mutations #:assert-mutation-score
+                ;; Subprocess isolation, for code that really exits the process
+                #:it-isolated
+                ;; Property-based testing: generated cases plus automatic shrinking on
+                ;; failure, for invariants that must hold across a whole input space
+                ;; rather than only the hand-picked examples the other IT cases cover.
+                #:it-property #:gen-integer #:gen-member #:gen-state-machine)
   (:import-from #:cl-cmatrix/cli
-   #:make-cmatrix-app
-   #:main
-   #:image-entry-point)
+                #:make-cmatrix-app
+                #:main
+                #:image-entry-point)
   (:import-from #:cl-cli
-   #:parse-argv
-   #:run-app
-   #:option-value
-   #:cli-invalid-option-value)
+                #:parse-argv
+                #:run-app
+                #:option-value
+                #:cli-invalid-option-value)
   (:import-from #:cl-tty-kit
-   #:rgb-to-256
-   #:blend-colors
-   #:color-luminance
-   #:make-screen
-   #:screen-cell
-   #:cell-char
-   #:cell-style
-   #:make-renderer
-   #:renderer-width
-   #:renderer-height
-   #:make-key-event
-   #:make-stream-input-poller
-   #:key-event-code)
+                #:rgb-to-256
+                #:blend-colors
+                #:color-luminance
+                #:make-screen
+                #:screen-cell
+                #:cell-char
+                #:cell-style
+                #:make-renderer
+                #:renderer-width
+                #:renderer-height
+                #:make-key-event
+                #:make-stream-input-poller
+                #:key-event-code)
   (:export #:run-tests))
 
 (in-package #:cl-cmatrix/test)

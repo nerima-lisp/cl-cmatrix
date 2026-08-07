@@ -88,6 +88,9 @@ same X/ROW -- the two frames differ only in the style at that cell."
     (expect (equal (matrix-cell-style :green 0 5 nil) (matrix-cell-style :green 0 5 t))
             :to-be-truthy)))
 
+  (it "leaves the head unbold when NO-BOLD is requested"
+    (expect (not (member :bold (matrix-cell-style :green 0 5 nil t))) :to-be-truthy))
+
 (describe "matrix-draw"
   (it "writes each column's currently lit glyphs at their rows, and leaves unlit rows blank"
     (let ((state (make-matrix-state 3 24 :random-state (sb-ext:seed-random-state 30))))
@@ -142,6 +145,81 @@ same X/ROW -- the two frames differ only in the style at that cell."
       (with-soft-assertions
         (expect (and x row) :to-be-truthy)
         (expect (and x row (not (member :bold (cell-style (screen-cell screen x row)))))
+                :to-be-truthy))))
+
+  (it "uses STATE's random-bold setting for deterministic trail styles"
+    (let ((state (make-matrix-state 3 24 :random-bold-p t
+                                    :random-state (sb-ext:seed-random-state 31))))
+      (dotimes (i 30) (setf state (matrix-advance state)))
+      (let ((screen (make-screen 3 24)))
+        (matrix-draw screen state (make-render-context))
+        (multiple-value-bind (x row) (%non-head-lit-cell state)
+          (with-soft-assertions
+            (expect (matrix-state-random-bold-p state) :to-be-truthy)
+            (expect (and x row) :to-be-truthy)
+            (expect
+             (eq (not (null (member :bold (cell-style (screen-cell screen x row)))))
+                 (cl-cmatrix::%random-bold-cell-p
+                  x row (matrix-state-tick state)))
+             :to-be-truthy))))))
+
+  (it "selects both plain and bold styles for random-bold cells"
+    (let* ((column (cl-cmatrix::%make-column
+                    :head 3 :length 3 :glyphs #(#\a #\b #\c)))
+           (cache (make-hash-table :test #'eq))
+           (styles (cl-cmatrix::%matrix-style-vector :green 3 nil cache))
+           (bold-styles (cl-cmatrix::%matrix-style-vector :green 3 t cache))
+           (screen (make-screen 1 6)))
+      (cl-cmatrix::%matrix-draw-column
+       screen 0 column 6 styles
+       :bold-styles bold-styles
+       :random-bold-p t
+       :tick 0)
+      (with-soft-assertions
+        (expect (member :bold (cell-style (screen-cell screen 0 3)))
+                :to-be-truthy)
+        (expect (not (member :bold (cell-style (screen-cell screen 0 2))))
+                :to-be-truthy)
+        (expect (member :bold (cell-style (screen-cell screen 0 1)))
+                :to-be-truthy))))
+
+  (it "draws old-style rows with their stored per-glyph bold metadata"
+    (let* ((state (make-matrix-state 1 3 :old-style-p t :partial-bold-p t
+                                     :random-state (sb-ext:seed-random-state 41)))
+           (column (cl-cmatrix::%make-old-style-column
+                    :glyphs (vector #\a nil #\c)
+                    :glyph-bold-p (vector t nil t)
+                    :spaces 0))
+           (screen (make-screen 1 3)))
+      (setf (aref (matrix-state-columns state) 0) column)
+      (matrix-draw screen state (make-render-context))
+      (with-soft-assertions
+        (expect (char= (cell-char (screen-cell screen 0 0)) #\a) :to-be-truthy)
+        (expect (char= (cell-char (screen-cell screen 0 2)) #\c) :to-be-truthy)
+        (expect (member :bold (cell-style (screen-cell screen 0 0))) :to-be-truthy)
+        (expect (member :bold (cell-style (screen-cell screen 0 2)))
+                :to-be-truthy))))
+
+  (it "centers short messages, clips long messages, and ignores empty messages"
+    (let ((short-screen (make-screen 5 4))
+          (long-screen (make-screen 5 4))
+          (empty-screen (make-screen 5 4)))
+      (cl-cmatrix::matrix-draw-message short-screen 5 4 "hi")
+      (cl-cmatrix::matrix-draw-message long-screen 5 4 "toolong")
+      (cl-cmatrix::matrix-draw-message empty-screen 5 4 nil)
+      (cl-cmatrix::matrix-draw-message empty-screen 5 4 "")
+      (with-soft-assertions
+        (expect (char= (cell-char (screen-cell short-screen 0 2)) #\Space)
+                :to-be-truthy)
+        (expect (char= (cell-char (screen-cell short-screen 1 2)) #\h)
+                :to-be-truthy)
+        (expect (char= (cell-char (screen-cell short-screen 2 2)) #\i)
+                :to-be-truthy)
+        (loop for x below 5
+              for expected across "toolo"
+              do (expect (char= (cell-char (screen-cell long-screen x 2)) expected)
+                         :to-be-truthy))
+        (expect (char= (cell-char (screen-cell empty-screen 0 2)) #\Space)
                 :to-be-truthy)))))
 
 (describe "%matrix-style-vector"
@@ -211,6 +289,26 @@ same X/ROW -- the two frames differ only in the style at that cell."
         ;; off-screen head left off instead of restarting at offset 0.
         (expect (equal (cell-style (screen-cell screen 0 3)) (svref styles 2))
                 :to-be-truthy)))))
+
+  (it "uses character parity when partial-bold metadata is shorter than the glyph vector"
+    (let* ((column (cl-cmatrix::%make-column
+                    :head 3 :length 3
+                    :glyphs (vector #\a #\b #\c)
+                    :glyph-bold-p #()))
+           (cache (make-hash-table :test #'eq))
+           (styles (cl-cmatrix::%matrix-style-vector :green 3 nil cache))
+           (bold-styles (cl-cmatrix::%matrix-style-vector :green 3 t cache))
+           (screen (make-screen 1 4)))
+      (cl-cmatrix::%matrix-draw-column
+       screen 0 column 4 styles
+       :bold-styles bold-styles
+       :partial-bold-p t
+       :glyph-bold-p #())
+      (with-soft-assertions
+        (expect (not (member :bold (cell-style (screen-cell screen 0 2))))
+                :to-be-truthy)
+        (expect (member :bold (cell-style (screen-cell screen 0 1)))
+                :to-be-truthy))))
 
 (describe "%column-color"
   (it "returns COLOR unchanged when RAINBOW-SCHEMES is NIL"

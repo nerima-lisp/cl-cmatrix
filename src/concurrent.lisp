@@ -20,39 +20,44 @@ worker completion order cannot affect the next MATRIX-STATE."
           collect (list index start (min count (+ start chunk-size))))))
 
 (defun %matrix-advance-with-executor (state executor workers)
-  "Advance STATE's columns concurrently through EXECUTOR."
+  "Advance wide STATE through EXECUTOR using deterministic per-column chunks."
   (let* ((glyphs (matrix-state-glyphs state))
-         (random-state (%copy-random-state (matrix-state-random-state state)))
+         (random-state (%copy-random-state
+                        (matrix-state-random-state state)))
          (speed (matrix-state-speed state))
          (height (matrix-state-height state))
+         (asyncp (matrix-state-asyncp state))
+         (change-glyphs-p (matrix-state-change-glyphs-p state))
          (old-columns (matrix-state-columns state))
          (count (length old-columns))
          (ranges (%column-ranges count workers))
          (random-states (%parallel-random-states random-state (length ranges)))
          (chunks
-           (executor-map
-            executor
-            (lambda (range)
-              (let* ((chunk-index (first range))
-                     (start (second range))
-                     (end (third range))
-                     (random-state (svref random-states chunk-index))
-                     (columns (make-array (- end start))))
-                (loop for index from start below end
-                      for output-index from 0
-                      do (setf (svref columns output-index)
-                               (%advance-column (svref old-columns index)
-                                                glyphs
-                                                random-state
-                                                speed
-                                                height)))
-                columns))
-            ranges
-            :max-in-flight (length ranges)))
+           (executor-map executor
+                         (lambda (range)
+                           (destructuring-bind (chunk-index start end) range
+                             (let ((local-random-state
+                                     (aref random-states chunk-index)))
+                               (loop for index from start below end
+                                     collect
+                                     (%advance-matrix-column
+                                      (aref old-columns index)
+                                      glyphs
+                                      local-random-state
+                                      speed
+                                      height
+                                      :asyncp asyncp
+                                      :change-glyphs-p change-glyphs-p)))))
+                         ranges
+                         :max-in-flight (length ranges)))
          (new-columns (make-array count)))
     (loop for range in ranges
           for chunk in chunks
-          do (replace new-columns chunk :start1 (second range)))
+          do (destructuring-bind (chunk-index start end) range
+               (declare (ignore chunk-index))
+               (loop for index from start below end
+                     for column in chunk
+                     do (setf (aref new-columns index) column))))
     (let ((new-state (%copy-matrix-state state)))
       (setf (matrix-state-columns new-state) new-columns
             (matrix-state-random-state new-state) random-state

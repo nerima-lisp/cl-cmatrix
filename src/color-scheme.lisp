@@ -5,7 +5,8 @@
 ;;;; white in every scheme, the classic look), the color the trail is
 ;;;; brightest at just behind the head, and the color it dims toward at its
 ;;;; tail (black in every scheme, so a trail fades into the terminal
-;;;; background). MATRIX-CELL-STYLE in render.lisp maps these through
+;;;; background). :BLACK intentionally keeps both trail colors black while
+;;;; preserving the white head. MATRIX-CELL-STYLE in render.lisp maps these through
 ;;;; CL-TTY-KIT:RGB-TO-256 to actual xterm 256-color indices.
 ;;;;
 ;;;; :RAINBOW is a further --color choice, but deliberately not an entry in
@@ -28,7 +29,8 @@
         (list :purple '(255 255 255) '(150 60 230) '(0 0 0))
         (list :orange '(255 255 255) '(230 130 30) '(0 0 0))
         (list :amber '(255 255 255) '(230 180 20) '(0 0 0))
-        (list :pink '(255 255 255) '(230 90 160) '(0 0 0))))
+        (list :pink '(255 255 255) '(230 90 160) '(0 0 0))
+        (list :black '(255 255 255) '(0 0 0) '(0 0 0))))
 
 (defparameter +color-schemes+ (%build-color-schemes)
   "Maps a color scheme name to a (HEAD-RGB BRIGHT-RGB DARK-RGB) list of three

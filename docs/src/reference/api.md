@@ -10,9 +10,13 @@ front end lives in the separate `cl-cmatrix/cli` package (`make-cmatrix-app`,
 
 ```lisp
 (run-matrix &key (speed 1) (color :green) (glyphs +default-glyphs+) (bold nil)
+                 (asyncp t) (random-bold-p nil) (change-glyphs-p nil)
+                 (screensaverp nil) (lockp nil) message
                  (stream *standard-output*)
                  (input-stream *standard-input*) (fd 0)
-                 (fps 30) (random-state (make-random-state t)))
+                 (fps +default-fps+) update-delay
+                 (workers +default-workers+)
+                 (random-state (make-random-state t)))
 ```
 
 Run the full-screen animation on `stream` until a typed quit event (`q`, `Q`,
@@ -21,10 +25,23 @@ once to CL-TTY-KIT's input poller; callers do not need to parse raw
 characters. Enters raw mode and the terminal's alternate screen for the
 duration and always restores both.
 `speed`, `color`, `glyphs`, and `bold` are as in
-[`make-matrix-state`](#make-matrix-state). `fps` is the target tick rate
-(default 30, see [`+default-fps+`](#default-fps)). `random-state` seeds the
-fall-timing and glyph randomness. Returns the final
+[`make-matrix-state`](#make-matrix-state). `fps` is the long-form target tick
+rate (default 30, see [`+default-fps+`](#default-fps)). When `update-delay` is
+non-NIL, it takes precedence over `fps` and is interpreted as 10ms units in
+the upstream-compatible range 0 through 10 (default 4 when driven by the
+CLI; see [`+default-update-delay+`](#default-update-delay)). `workers` controls the
+persistent `cl-concurrent-kit` worker pool used for sufficiently wide
+matrices (default 4, see [`+default-workers+`](#default-workers)); narrow
+matrices stay on the serial transition path. `random-state` seeds the
+fall-timing and glyph randomness. `asyncp` selects asynchronous column timing;
+`random-bold-p` and `change-glyphs-p` enable the corresponding per-column
+effects. `screensaverp` exits on the first input event, while `lockp` starts
+with quit keys and interactive interrupts ignored. A non-NIL `message` is
+centered over the animation. Returns the final
 [`matrix-state`](#matrix-state).
+Signals [`invalid-fps`](#invalid-fps) when `fps` is not a positive real
+number, or [`invalid-update-delay`](#invalid-update-delay) when `update-delay`
+is outside its integer 0 through 10 range, before terminal setup begins.
 
 ## Building a custom driver loop
 
@@ -38,10 +55,21 @@ instead of calling `run-matrix`.
 
 `run-matrix`'s default tick rate: 30 ticks per second.
 
+### `+default-update-delay+`
+
+The upstream-compatible default update delay: 4 units of 10 milliseconds.
+
+### `+default-workers+`
+
+`run-matrix`'s default number of worker threads for wide matrix transitions:
+4. The executor is created once per wide `run-matrix` invocation rather than
+once per tick; narrow matrices do not start worker threads.
+
 ### `run-state`
 
 ```lisp
-(make-run-state &key matrix renderer quitp input-poller render-context)
+(make-run-state &key matrix renderer quitp lockp screensaverp pausedp message
+                         input-poller render-context workers executor)
 ```
 
 The mutable driver state threaded through
@@ -50,8 +78,13 @@ The mutable driver state threaded through
 double-buffered `cl-tty-kit` repaint helper), `run-state-quitp` (set once a
 quit event has been seen), `run-state-input-poller` (a callable that returns
 typed `cl-tty-kit:key-event` values), and `run-state-render-context` (the
-renderer-local style cache). Kept separate from `matrix-state` so that the
-animation state stays free of I/O and rendering caches.
+renderer-local style cache), `run-state-workers` (the configured number of
+worker threads), and `run-state-executor` (the optional persistent
+`cl-concurrent-kit` executor). `run-state-lockp` records lock mode,
+`run-state-screensaverp` makes the first input event quit, `run-state-pausedp`
+records pause state, and `run-state-message` stores the optional centered
+message. Kept separate from `matrix-state` so that the animation state stays
+free of I/O, rendering caches, and executor ownership.
 
 ### `run-state-poll`
 
@@ -75,8 +108,9 @@ before every tick's `run-state-advance`.
 Advance `run-state`'s underlying `matrix-state` by one tick via
 [`matrix-advance`](#matrix-advance). Returns `run-state`, mutated in place --
 the animation-only half of the poll/advance split; terminal observation is
-`run-state-poll`'s job instead. `matrix-advance` copies the random state
-before consuming it, so caller-owned state is not mutated.
+`run-state-poll`'s job instead. Wide matrices use the executor stored on
+`run-state`; `matrix-advance` copies the random state before consuming it, so
+caller-owned state is not mutated.
 
 ### `run-state-render`
 
@@ -135,13 +169,18 @@ than only the head. Signals [`invalid-dimensions`](#invalid-dimensions),
 ### `matrix-advance`
 
 ```lisp
-(matrix-advance state)
+(matrix-advance state &key executor (workers +default-workers+))
 ```
 
 Advance every column of `state` by one tick, returning a new `matrix-state`.
-Deterministic for an already-positioned state: the same state and tick count
-always reach the same column state. Each transition consumes a copy of the
-stored random state, leaving the input state's random state untouched.
+When `executor` is supplied and the matrix is sufficiently wide, columns are
+processed in deterministic chunks through `cl-concurrent-kit:executor-map`;
+the returned chunks are restored by column range, not worker completion order.
+Without an executor, or for a narrow matrix, the serial path is used. The
+transition is deterministic for an already-positioned state: the same state
+and tick count always reach the same column state. Each transition consumes a
+copy of the stored random state, leaving the input state's random state
+untouched.
 
 ### `matrix-resize`
 
@@ -189,7 +228,7 @@ The glyph `column` shows at `row`, and whether `row` is currently part of
 
 Return every registered scheme name: `:green` (the default), `:cyan`,
 `:red`, `:blue`, `:magenta`, `:yellow`, `:white`, `:purple`, `:orange`,
-`:amber`, `:pink`.
+`:amber`, `:pink`, `:black`.
 
 ### `color-scheme-p`
 
@@ -335,6 +374,17 @@ values back.
 
 Signaled when `speed` is not a positive real. `invalid-speed-speed` reads
 the offending value back.
+
+### `invalid-fps`
+
+Signaled by [`run-matrix`](#run-matrix) when `fps` is not a positive real.
+`invalid-fps-fps` reads the offending value back.
+
+### `invalid-update-delay`
+
+Signaled by [`run-matrix`](#run-matrix) when `update-delay` is outside the
+integer range 0 through 10. `invalid-update-delay-delay` reads the offending
+value back.
 
 ### `unknown-color-scheme`
 

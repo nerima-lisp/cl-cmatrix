@@ -56,9 +56,9 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
   ;;
   ;; Every other nerima-lisp org package was surveyed against this system and
   ;; deliberately left out, not overlooked: cl-dataflow's "state machine"
-  ;; pulls in cl-prolog and cl-concurrent-kit as hard runtime dependencies to
-  ;; execute a graph, which is strictly more machinery than MATRIX-STATE's
-  ;; two pure DEFSTRUCT-transition functions need. cl-boundary-kit targets
+  ;; pulls in cl-prolog as a hard runtime dependency to execute a graph, which
+  ;; is strictly more machinery than MATRIX-STATE's two pure
+  ;; DEFSTRUCT-transition functions need. cl-boundary-kit targets
   ;; multi-effect application boundaries (filesystem, network, clock, ...);
   ;; this system already has exactly two DOMAIN effects, and both are already
   ;; injected directly (RANDOM-STATE, TERMINAL-SIZE-FN) with no framework
@@ -67,9 +67,9 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
   ;; three more transitive dependencies (cl-date-kit, cl-concurrent-kit,
   ;; cl-host-kit) for a diagnostic feature nothing here asks for. The rest
   ;; (cl-json-kit, cl-regex-kit, cl-parser-kit, cl-codec-kit, cl-date-kit,
-  ;; cl-concurrent-kit, cl-history-kit, cl-process-kit) solve problems --
-  ;; JSON, regex, parsing, encoding, calendars, threading, shell history,
-  ;; subprocesses -- this system does not have. Adding any of them would be
+  ;; cl-history-kit, cl-process-kit) solve problems -- JSON, regex, parsing,
+  ;; encoding, calendars, shell history, subprocesses -- this system does not
+  ;; have. Adding any of them would be
   ;; exactly the "変にAdapter" this org's standards warn against: a
   ;; dependency justified by its existence rather than by a need.
   ;;
@@ -86,25 +86,29 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
   ;; this system rather than dependencies of it), loom (a text editor), and
   ;; nshell (an interactive shell). cl-tmux is a terminal multiplexer, also
   ;; an application. None are import candidates for a library.
-  :depends-on ("cl-tty-kit"  ; terminal session, renderer, 256-color styling, tick loop
-               "cl-cli"      ; declarative CLI parsing, --help/--version
-               "cl-host-kit") ; QUIT, GETCWD, TRUENAMIZE -- host-system interaction, not UIOP
+  :depends-on ("cl-tty-kit"        ; terminal session, renderer, 256-color styling, tick loop
+               "cl-concurrent-kit" ; persistent executor for wide matrix transitions
+               "cl-cli"            ; declarative CLI parsing, --help/--version
+               "cl-host-kit")      ; QUIT, GETCWD, TRUENAMIZE -- host-system interaction, not UIOP
   :pathname "src"
   :serial t
   :components
   ;; src/ is flat and every defpackage lives in src/package.lisp.
   ((:file "package")
+   (:file "config")
    (:file "conditions")
    (:file "registry")
    (:file "glyphs")
    (:file "color-scheme")
    (:file "column")
    (:file "state")
+   (:file "concurrent")
    (:file "render-context")
    (:file "render")
    (:file "input")
    (:file "run-state")
    (:file "runtime")
+   (:file "cli-options")
    (:file "cli"))
   ;; Mandatory. Without it `asdf:test-system "cl-cmatrix"` succeeds while
   ;; running zero tests.
@@ -133,10 +137,12 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
    (:file "color-scheme-test")
    (:file "state-test")
    (:file "advance-test")
+   (:file "concurrent-test")
    (:file "resize-test")
    (:file "render-test")
    (:file "input-test")
    (:file "run-state-test")
+   (:file "runtime-test")
    (:file "state-machine-test")
    (:file "cli-test")
    (:file "mutation-test"))

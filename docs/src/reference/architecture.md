@@ -20,17 +20,20 @@ its origin stays visible at every call site's package qualification.
 | File | Owns |
 |---|---|
 | `src/package.lisp` | Both `defpackage` forms and every import/export. |
-| `src/conditions.lisp` | `cl-cmatrix-error` and its four subclasses. |
+| `src/conditions.lisp` | `cl-cmatrix-error` and its five subclasses. |
+| `src/config.lisp` | Shared numeric defaults and the wide-matrix parallelization threshold. |
 | `src/glyphs.lisp` | The three built-in glyph sets and the `:charset` registry. |
-| `src/color-scheme.lisp` | The eleven built-in color schemes and their registry. |
+| `src/color-scheme.lisp` | The twelve built-in color schemes and their registry. |
 | `src/registry.lisp` | `define-registry-queries`, shared by the two registries above. |
 | `src/column.lisp` | `column`: one falling character stream's state and fall logic. |
 | `src/state.lisp` | `matrix-state`: the pure, whole-screen struct `t/` tests directly. |
+| `src/concurrent.lisp` | Persistent-worker configuration and deterministic parallel column transitions. |
 | `src/render-context.lisp` | `render-context`: renderer-local style-cache ownership. |
 | `src/render.lisp` | `matrix-draw`/`matrix-cell-style`, mapping `matrix-state` onto a `cl-tty-kit` screen. |
 | `src/input.lisp` | Typed quit-event predicates and direct/CPS event dispatch. |
 | `src/run-state.lisp` | `run-state`: renderer, typed input poller, resize polling, and tick adapters. |
 | `src/runtime.lisp` | The real-time driver loop and `run-matrix` itself. |
+| `src/cli-options.lisp` | Declarative `cl-cli` option metadata and registry-derived choices. |
 | `src/cli.lisp` | `cl-cmatrix/cli`: flag parsing, `main`, `image-entry-point`. |
 
 ## Why `matrix-state` and `run-state` are separate structs
@@ -39,16 +42,32 @@ its origin stays visible at every call site's package qualification.
 columns, dimensions, speed, color, glyphs, and an injected `random-state`.
 Nothing in it touches a terminal or owns renderer caches. `run-state`
 (`src/run-state.lisp`) wraps a `matrix-state` together with a `cl-tty-kit`
-renderer, a typed input poller, a render context, and a quit flag -- the I/O
-half `run-matrix`'s tick loop needs. `src/runtime.lisp` owns terminal-session
-setup and the realtime tick-loop composition, while `src/input.lisp` owns the
-quit policy.
+renderer, a typed input poller, a render context, an optional persistent
+`cl-concurrent-kit` executor, its worker count, and a quit flag -- the I/O and
+parallelism half `run-matrix`'s tick loop needs. `src/runtime.lisp` owns
+terminal-session setup, executor selection and lifetime, and realtime tick-loop
+composition;
+`src/concurrent.lisp` owns the deterministic chunk transition helpers, while
+`src/input.lisp` owns the quit policy.
 
 Keeping them separate is what lets `t/`'s deterministic tests call
 `matrix-advance` directly, seed a `random-state`, and assert on exact
 resulting column state, with no renderer, no terminal, and no real time
 involved. A single merged struct would force every one of those tests
 through a real or faked terminal session just to construct it.
+
+## Why columns are advanced in chunks
+
+Each tick creates a new `matrix-state`, so the old columns can be advanced
+independently. `src/concurrent.lisp` derives deterministic child random
+states in chunk order before submitting work, partitions columns into fixed
+ranges, and calls `cl-concurrent-kit:executor-map`. Results are copied back by
+range rather than completion order, so worker scheduling cannot reorder the
+next state. For a sufficiently wide matrix, `run-matrix` creates one executor
+for the whole run and stores it on `run-state`, avoiding worker-pool creation
+on every tick. Narrow matrices do not start worker threads at all, and callers
+that do not provide an executor retain the serial path because dispatch
+overhead would outweigh the available column work.
 
 ## Why `run-matrix`, `main`, and `image-entry-point` are tested out of process
 

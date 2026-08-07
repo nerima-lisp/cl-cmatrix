@@ -17,9 +17,14 @@
 ;;;; lives here instead.
 ;;;;
 ;;;; +MINIMUM-BRANCH-PERCENT+ is nerima-lisp/.github's TEST_STANDARD.md
-;;;; floor (90%) and this system already clears it (90.91% measured).
+;;;; floor (90%) and this system already clears it (92.59% measured).
 ;;;; +MINIMUM-EXPRESSION-PERCENT+ is NOT that floor. History, because the gap
 ;;;; and the work closing most of it are both worth keeping:
+;;;;
+;;;; Current measurement after the concurrent runtime refactor and the
+;;;; programmatic RUN-MATRIX input-contract tests: 86.41% expression and
+;;;; 92.59% branch. The expression value reflects the added production code;
+;;;; the gate remains at 80% because the remaining gap is structural.
 ;;;;
 ;;;; Measured 74.00% on 2026-08-02. Built the actual `cover-index.html` to
 ;;;; see why (temporarily force this file's floor to 0 to let a failing gate

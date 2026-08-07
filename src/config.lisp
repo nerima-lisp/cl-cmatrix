@@ -23,6 +23,9 @@
 (defconstant +default-fps+ 30
   "Default tick rate, in ticks per second, for RUN-MATRIX.")
 
+(defconstant +default-update-delay+ 4
+  "Default upstream-compatible update delay in 10 millisecond units.")
+
 (defconstant +default-workers+ 4
   "Default number of worker threads used by RUN-MATRIX.")
 

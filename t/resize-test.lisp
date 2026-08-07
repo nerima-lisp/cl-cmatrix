@@ -35,6 +35,18 @@
         (expect (= (matrix-state-height resized) 20) :to-be-truthy)
         (expect (equalp (matrix-state-columns resized) before) :to-be-truthy))))
 
+  (it "resizes fixed-height old-style buffers with their mode intact"
+    (let* ((state (make-matrix-state 5 10 :old-style-p t
+                                     :random-state (sb-ext:seed-random-state 63)))
+           (resized (matrix-resize state 7 14)))
+      (expect (matrix-state-old-style-p resized) :to-be-truthy)
+      (expect (every (lambda (column)
+                       (and (old-style-column-p column)
+                            (= (length (old-style-column-glyphs column)) 14)
+                            (= (length (old-style-column-glyph-bold-p column)) 14)))
+                     (matrix-state-columns resized))
+              :to-be-truthy)))
+
   (it "reflows reproducibly: growing twice from the same seed yields identical new columns"
     (let* ((state-1 (matrix-resize
                       (make-matrix-state 3 10 :random-state (sb-ext:seed-random-state 21)) 6 10))

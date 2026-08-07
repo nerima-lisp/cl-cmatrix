@@ -25,6 +25,8 @@
               :to-be-truthy)
       (expect (not (quit-key-event-p (%test-key-event :character #\q :release)))
               :to-be-truthy)
+      (expect (not (cl-cmatrix::%quit-character-p 3))
+              :to-be-truthy)
       (expect (not (quit-key-event-p (%test-key-event :special :enter)))
               :to-be-truthy))))
 

@@ -118,40 +118,51 @@
         mainProgram = "cl-cmatrix";
       };
 
-      clHostKit = ctx: ctx.cl.lispDerivation {
-        lispSystem = "cl-host-kit";
-        version = ctx.cl.fromAsdSystem "${cl-host-kit}/cl-host-kit.asd";
-        src = cl-host-kit;
-      };
+      clHostKit =
+        ctx:
+        ctx.cl.lispDerivation {
+          pname = "cl-host-kit-cmatrix";
+          lispSystem = "cl-host-kit";
+          version = ctx.cl.fromAsdSystem "${cl-host-kit}/cl-host-kit.asd";
+          src = cl-host-kit;
+        };
 
-      clBoundaryKit = ctx: ctx.cl.lispDerivation {
-        lispSystem = "cl-boundary-kit";
-        version = ctx.cl.fromAsdSystem "${cl-boundary-kit}/cl-boundary-kit.asd";
-        src = cl-boundary-kit;
-        lispDependencies = [ (clHostKit ctx) ];
-      };
+      clBoundaryKit =
+        ctx:
+        ctx.cl.lispDerivation {
+          lispSystem = "cl-boundary-kit";
+          version = ctx.cl.fromAsdSystem "${cl-boundary-kit}/cl-boundary-kit.asd";
+          src = cl-boundary-kit;
+          lispDependencies = [ (clHostKit ctx) ];
+        };
 
-      clDateKit = ctx: ctx.cl.lispDerivation {
-        lispSystem = "cl-date-kit";
-        version = ctx.cl.fromAsdSystem "${cl-date-kit}/cl-date-kit.asd";
-        src = cl-date-kit;
-      };
+      clDateKit =
+        ctx:
+        ctx.cl.lispDerivation {
+          lispSystem = "cl-date-kit";
+          version = ctx.cl.fromAsdSystem "${cl-date-kit}/cl-date-kit.asd";
+          src = cl-date-kit;
+        };
 
-      clConcurrentKit = ctx: ctx.cl.lispDerivation {
-        lispSystem = "cl-concurrent-kit";
-        version = ctx.cl.fromAsdSystem "${cl-concurrent-kit}/cl-concurrent-kit.asd";
-        src = cl-concurrent-kit;
-        lispDependencies = [
-          (clBoundaryKit ctx)
-          (clDateKit ctx)
-        ];
-      };
+      clConcurrentKit =
+        ctx:
+        ctx.cl.lispDerivation {
+          lispSystem = "cl-concurrent-kit";
+          version = ctx.cl.fromAsdSystem "${cl-concurrent-kit}/cl-concurrent-kit.asd";
+          src = cl-concurrent-kit;
+          lispDependencies = [
+            (clBoundaryKit ctx)
+            (clDateKit ctx)
+          ];
+        };
 
-      clCodecKit = ctx: ctx.cl.lispDerivation {
-        lispSystem = "cl-codec-kit";
-        version = ctx.cl.fromAsdSystem "${cl-codec-kit}/cl-codec-kit.asd";
-        src = cl-codec-kit;
-      };
+      clCodecKit =
+        ctx:
+        ctx.cl.lispDerivation {
+          lispSystem = "cl-codec-kit";
+          version = ctx.cl.fromAsdSystem "${cl-codec-kit}/cl-codec-kit.asd";
+          src = cl-codec-kit;
+        };
     in
     # `mkPackageFlake` spans systems -- it obtains a `pkgs` and its own
     # cl-nix-forge instance per entry in `systems` -- so the per-system `lib`
@@ -178,18 +189,15 @@
       # Source-based sibling systems are built as lispDerivations so their
       # ASDF ancestry is explicit. The pre-built cl-tty-kit package needs
       # fromDerivation because it comes from a sibling flake; its dependency
-      # systems are supplied directly rather than left to ASDF discovery.
+      # systems are supplied directly rather than left to ASDF discovery. Only
+      # cl-codec-kit is supplied inside that opaque wrapper. cl-concurrent-kit
+      # is supplied once below so its transitive closure is not duplicated.
       lispDependencies = ctx: [
         (ctx.cl.fromDerivation {
           drv = cl-tty-kit.packages.${ctx.system}.cl-tty-kit;
-          lispDependencies = [
-            (clCodecKit ctx)
-            (clConcurrentKit ctx)
-            (clBoundaryKit ctx)
-            (clDateKit ctx)
-            (clHostKit ctx)
-          ];
+          lispDependencies = [ (clCodecKit ctx) ];
         })
+        (clConcurrentKit ctx)
         cl-cli.packages.${ctx.system}.cl-cli
       ];
 

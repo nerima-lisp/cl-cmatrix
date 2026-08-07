@@ -42,6 +42,18 @@ HEIGHT is not a positive integer.")
   "Signaled by MAKE-MATRIX-STATE when SPEED is not a positive
 real number.")
 
+(define-cl-cmatrix-condition invalid-fps
+    ((fps invalid-fps-fps))
+    ("FPS must be a positive real number, got ~S." (invalid-fps-fps condition))
+  "Signaled by RUN-MATRIX when FPS is not a positive real number.")
+
+(define-cl-cmatrix-condition invalid-update-delay
+    ((delay invalid-update-delay-delay))
+    ("Update delay must be an integer from 0 through 10, got ~S."
+     (invalid-update-delay-delay condition))
+  "Signaled by RUN-MATRIX when the upstream-compatible update delay is
+outside the inclusive 0 through 10 range.")
+
 (define-cl-cmatrix-condition unknown-color-scheme
     ((name unknown-color-scheme-name))
     ("Unknown color scheme ~S. Known schemes: ~{~A~^, ~}."

@@ -17,6 +17,8 @@ error
 └── cl-cmatrix-error              (base for everything below)
     ├── invalid-dimensions
     ├── invalid-speed
+    ├── invalid-fps
+    ├── invalid-update-delay
     ├── unknown-color-scheme
     └── unknown-charset
 ```
@@ -48,6 +50,26 @@ not a positive real number.
 | Slot | Reader | Value |
 |---|---|---|
 | `speed` | `invalid-speed-speed` | The offending speed. |
+
+## `invalid-fps`
+
+Signaled by [`run-matrix`](api.md#run-matrix) when `fps` is not a positive
+real number. Validation happens before terminal setup, so programmatic callers
+get the same input contract as the command-line front end.
+
+| Slot | Reader | Value |
+|---|---|---|
+| `fps` | `invalid-fps-fps` | The offending frame rate. |
+
+## `invalid-update-delay`
+
+Signaled by [`run-matrix`](api.md#run-matrix) when `update-delay` is not an
+integer from 0 through 10. The value is measured in 10 millisecond units,
+matching upstream `cmatrix`; validation happens before terminal setup.
+
+| Slot | Reader | Value |
+|---|---|---|
+| `delay` | `invalid-update-delay-delay` | The offending update delay. |
 
 ## `unknown-color-scheme`
 

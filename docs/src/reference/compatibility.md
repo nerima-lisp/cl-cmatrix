@@ -20,6 +20,39 @@ CI gates `x86_64-linux`. `aarch64-darwin` is declared for local development
 on that architecture but carries no CI gate of its own -- a package built
 there is not independently verified the way the gated platform is.
 
+## cmatrix controls
+
+The animation and terminal controls that are meaningful in a POSIX text
+terminal are available: asynchronous columns (`-a`), bold modes (`-b`, `-B`,
+`-n`), changing glyphs (`-k`), lambda glyphs (`-m`), rainbow columns (`-r`),
+the centered message (`-M`), synchronous/old-style timing (`-o`), classic
+Japanese glyphs (`-c`), color selection (`-C`), upstream update delay (`-u`),
+and screensaver mode (`-s`, `-S`, `--screensaver`), lock mode (`-L`,
+`--lock`), Linux terminal forcing (`-f`, `--force-linux-term`), and alternate
+tty selection (`-t`, `--tty`). Runtime keys include `q`, `Q`, `Escape`, Ctrl-C, `L`, `a`,
+`b`, `B`, `n`, `k`, `m`, `p`, `P`, `0` through `9`, and the classic color keys.
+In screensaver mode, the first input event exits. Lock mode ignores quit keys
+and interactive interrupts; `-f` changes `TERM` only for the current
+invocation.
+
+The upstream short options that have a portable text-terminal equivalent keep
+their upstream spelling:
+
+| Upstream spelling | `cl-cmatrix` spelling | Reason |
+| --- | --- | --- |
+| `-c` classic Japanese glyphs | `-c`, `--classic`, `--katakana`, `--charset katakana` | Uses Unicode half-width katakana. |
+| `-C` color | `-C`, `--color` | Accepts the registered schemes and `rainbow`. |
+| `-s` screensaver | `-s`, `-S`, `--screensaver` | `-S` remains as a compatibility alias. |
+| `-u` update delay | `-u`, `--update-delay`, `--delay` | Integer 0..10 in 10ms units; default 4. |
+| `--fps` extension | `--fps` | 1..240 ticks per second; explicit `--fps` takes precedence over `-u`. |
+| `-f` force Linux `$TERM` | `-f`, `--force-linux-term` | Sets `TERM=linux` only while this invocation runs. |
+
+Linux console font selection (`-l`) and X window mode (`-x`) remain outside
+the portable `cl-tty-kit` text-terminal abstraction and are intentionally not
+accepted. They require platform-specific console or window-system backends;
+silently accepting them as no-ops would be less compatible than rejecting
+them.
+
 ## Charset rendering
 
 [`--charset katakana`](../getting-started.md#the-command-line) and its

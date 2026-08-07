@@ -3,9 +3,10 @@
 (in-package #:cl-cmatrix/test)
 
 (defun %run-parallel-ticks (width height ticks &key (seed 42) (speed 1)
-                                                      (workers 4))
+                                                      (workers 4) (old-style-p nil))
   (with-executor (executor :size workers :name "cl-cmatrix-test")
     (let ((state (make-matrix-state width height :speed speed
+                                     :old-style-p old-style-p
                                      :random-state (sb-ext:seed-random-state seed))))
       (dotimes (i ticks state)
         (setf state (matrix-advance state :executor executor
@@ -13,11 +14,16 @@
 
 (defun %parallel-column-snapshot (state)
   (map 'list (lambda (column)
-               (list (column-head column)
-                     (column-length column)
-                     (column-interval column)
-                     (column-counter column)
-                     (coerce (column-glyphs column) 'list)))
+               (if (old-style-column-p column)
+                   (list :old-style
+                         (coerce (old-style-column-glyphs column) 'list)
+                         (coerce (old-style-column-glyph-bold-p column) 'list)
+                         (old-style-column-spaces column))
+                   (list (column-head column)
+                         (column-length column)
+                         (column-interval column)
+                         (column-counter column)
+                         (coerce (column-glyphs column) 'list))))
        (matrix-state-columns state)))
 
 (describe "concurrent matrix advance"
@@ -26,6 +32,13 @@
                        (%run-parallel-ticks 2048 12 20)))
           (snapshot-2 (%parallel-column-snapshot
                        (%run-parallel-ticks 2048 12 20))))
+      (expect (equal snapshot-1 snapshot-2) :to-be-truthy)))
+
+  (it "is reproducible across independent executor runs in old-style mode"
+    (let ((snapshot-1 (%parallel-column-snapshot
+                       (%run-parallel-ticks 2048 12 20 :old-style-p t)))
+          (snapshot-2 (%parallel-column-snapshot
+                       (%run-parallel-ticks 2048 12 20 :old-style-p t))))
       (expect (equal snapshot-1 snapshot-2) :to-be-truthy)))
 
   (it "does not mutate the input columns in the executor path"

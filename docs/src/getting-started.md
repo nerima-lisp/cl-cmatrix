@@ -1,13 +1,15 @@
 # Getting Started
 
-`cl-cmatrix` targets **SBCL** and depends on three sibling nerima-lisp
+`cl-cmatrix` targets **SBCL** and depends on four sibling nerima-lisp
 libraries: [`cl-tty-kit`](https://github.com/nerima-lisp/cl-tty-kit) for the
 terminal session, renderer, and 256-color styling,
 [`cl-cli`](https://github.com/nerima-lisp/cl-cli) for argument parsing, and
 [`cl-host-kit`](https://github.com/nerima-lisp/cl-host-kit) for process exit,
 the working directory, and pathname canonicalization -- in place of calling
-ASDF's own bundled UIOP for those directly. The test system additionally
-uses [`cl-weave`](https://github.com/nerima-lisp/cl-weave).
+ASDF's own bundled UIOP for those directly, plus
+[`cl-concurrent-kit`](https://github.com/nerima-lisp/cl-concurrent-kit) for the
+persistent worker executor used by wide matrices. The test system
+additionally uses [`cl-weave`](https://github.com/nerima-lisp/cl-weave).
 
 ## With Nix
 
@@ -34,18 +36,29 @@ find them (for example under `~/common-lisp/`), then:
 ```
 
 `run-matrix` takes over the terminal (raw mode, alternate screen) until a
-quit key is pressed, and always restores it afterward.
+quit key is pressed, and always restores it afterward. Pass `:workers` to
+configure the persistent worker pool; wide matrices use it for column updates,
+while narrow matrices remain serial to avoid scheduling overhead.
 
 ## The command line
 
 ```sh
 cl-cmatrix                     # default green rain at normal speed
 cl-cmatrix --speed 2            # fall twice as fast
-cl-cmatrix -c cyan               # a different color scheme
-cl-cmatrix -c rainbow            # a different scheme per column
+cl-cmatrix -C cyan               # a different color scheme
+cl-cmatrix -C rainbow            # a different scheme per column
+cl-cmatrix -c                    # upstream-compatible half-width katakana
 cl-cmatrix -g katakana           # half-width katakana glyphs instead of ASCII
+cl-cmatrix --classic              # upstream cmatrix-compatible katakana alias
 cl-cmatrix -b                    # bold the whole trail, not only the head
-cl-cmatrix -u 60                 # 60 ticks per second instead of 30
+cl-cmatrix -u 4                  # upstream delay: 4 x 10ms (the default)
+cl-cmatrix --fps 60              # long-form extension: 60 ticks per second
+cl-cmatrix -s                    # exit on the first input event
+cl-cmatrix -L                    # lock; ignore quit keys and interrupts
+cl-cmatrix -M 'hello'            # show a centered message
+cl-cmatrix -f                    # force TERM=linux for this invocation
+cl-cmatrix -t /dev/tty           # use a specific terminal device
+cl-cmatrix --workers 8           # use eight workers for wide matrices
 cl-cmatrix --seed 42             # reproducible run
 cl-cmatrix --help                # every flag, free from cl-cli
 ```

@@ -11,7 +11,7 @@ q/Escape/Ctrl-C, always restoring the terminal's prior state. The default
 glyph set is plain printable ASCII, not a port of the classic `cmatrix`'s
 proprietary katakana bitmap font -- though a Unicode half-width katakana
 glyph set is available via `--charset katakana` for a closer look, alongside
-`--charset binary` and eleven color schemes, plus `rainbow` for a
+`--charset binary` and twelve color schemes, plus `rainbow` for a
 different scheme per column.
 
 Full documentation is published at <https://nerima-lisp.github.io/cl-cmatrix/>.
@@ -21,8 +21,8 @@ The source for that site lives in [docs/src/](docs/src/).
 
 ```sh
 cl-cmatrix                  # default green rain at normal speed
-cl-cmatrix --speed 2 -c cyan
-cl-cmatrix -c rainbow -g katakana -b   # rainbow katakana, bold trail
+cl-cmatrix --speed 2 -C cyan
+cl-cmatrix -C rainbow -c -b          # rainbow katakana, bold trail
 cl-cmatrix --seed 42                    # reproducible run
 ```
 
@@ -34,13 +34,17 @@ Or as a library:
 (cl-cmatrix:run-matrix :speed 1.5 :color :cyan)
 ```
 
+Pass `:workers` to configure the persistent `cl-concurrent-kit` worker pool.
+Wide matrices use it for column updates; narrow matrices remain serial to
+avoid scheduling overhead.
+
 ## Install
 
 As a command, from a checkout:
 
 ```sh
 nix build              # -> ./result/bin/cl-cmatrix
-./result/bin/cl-cmatrix --speed 2 -c cyan
+./result/bin/cl-cmatrix --speed 2 -C cyan
 ```
 
 Or without cloning: `nix run github:nerima-lisp/cl-cmatrix`.

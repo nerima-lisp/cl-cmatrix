@@ -46,6 +46,8 @@ cases use `cl-weave`'s `it-each` table-test macro instead of a hand-rolled
 loop over `expect`, so each input gets its own named pass/fail; shared setup
 uses `before-each` fixtures over a dynamic variable instead of copy-pasted
 `let` bindings.
+`t/concurrent-test.lisp` additionally checks deterministic executor-backed
+advances for wide matrices and keeps the serial fallback covered.
 
 `run-matrix` itself, and `main`/`image-entry-point` (`src/cli.lisp`), are
 never called from the main test process: all three end in either a real
@@ -77,8 +79,8 @@ nix build .#checks.<system>.coverage -o coverage-report
 `$out` is the `sb-cover` HTML report itself, produced by `cl-nix-forge`'s
 `mkCoverageReport`. `scripts/coverage-entry.lisp` runs as its entry point:
 it loads and runs the test suite, then gates on `cl-weave:coverage-statistics`
-against two floors -- 90% branch (cleared: measured 90.91%) and 80%
-expression (measured 86.65%). The two floors differ because the remaining
+against two floors -- 90% branch (cleared: measured 92.59%) and 80%
+expression (measured 86.41%). The two floors differ because the remaining
 expression gap is structural, not a testability shortfall: `sb-cover` never
 credits compile-time-only forms (`in-package`, `defpackage` bodies, a bare
 `defmacro`'s own template) or a `defstruct` slot's `:type` declaration, and
@@ -97,16 +99,19 @@ before proposing to raise either floor.
 src/
 ├── package.lisp        both packages, every import/export
 ├── conditions.lisp      cl-cmatrix-error and its subclasses
+├── config.lisp          shared defaults and parallelization threshold
 ├── glyphs.lisp           built-in glyph sets, the :charset registry
 ├── color-scheme.lisp     built-in color schemes, their registry
 ├── registry.lisp         shared list-*/​*-p registry-query macro
 ├── column.lisp           one falling character stream
 ├── state.lisp            matrix-state, the pure whole-screen struct
+├── concurrent.lisp       worker configuration and parallel column advance
 ├── render-context.lisp   render-owned style memoization
 ├── render.lisp           matrix-state -> cl-tty-kit screen
 ├── input.lisp            typed key-event quit dispatch and CPS helpers
 ├── run-state.lisp        mutable realtime driver state and tick helpers
 ├── runtime.lisp          terminal session, tick loop, and run-matrix
+├── cli-options.lisp      declarative command-line option metadata
 └── cli.lisp              cl-cmatrix/cli: flags, main, image-entry-point
 t/                        one test file per source concern above
 docs/                     this site (mkdocs.yml + src/)

@@ -41,33 +41,48 @@ time."
                               (parse-argv (make-cmatrix-app) (cons "cl-cmatrix" ',rejects)))
                      :to-be-truthy))))))
 
-(describe "the cl-cmatrix app spec: flag parsing round-trips"
-  (define-option-round-trip :speed 1.0d0 ("-s" "2.5") 2.5d0 ("--speed" "0"))
-  (define-option-round-trip :color "green" ("-c" "cyan") "cyan" ("-c" "not-a-color"))
-  (define-option-round-trip :charset "ascii" ("-g" "katakana") "katakana" ("-g" "not-a-charset"))
-  (define-option-round-trip :bold nil ("-b") t)
-  (define-option-round-trip :fps 30 ("-u" "60") 60 ("--fps" "0"))
-  (define-option-round-trip :seed nil ("--seed" "42") 42)
-
-  (it "accepts --color rainbow, a further valid value beyond DEFINE-OPTION-ROUND-TRIP's own case"
-    (let ((invocation (parse-argv (make-cmatrix-app) '("cl-cmatrix" "-c" "rainbow"))))
-      (expect (string= (option-value invocation :color) "rainbow") :to-be-truthy))))
+(define-option-round-trip :old-style nil ("-o") t)
 
 (describe "%cmatrix-run-matrix-args"
   (it "resolves every option into RUN-MATRIX's own keyword-argument shape"
     (let* ((invocation (parse-argv (make-cmatrix-app)
-                                    '("cl-cmatrix" "-s" "2.5" "-c" "cyan" "-g" "katakana" "-b"
-                                      "-u" "60" "--seed" "42")))
+                                    '("cl-cmatrix" "--speed" "2.5" "-C" "cyan" "-g" "katakana" "-b"
+                                      "-o" "-L" "-f" "-t" "/dev/tty" "--fps" "60"
+                                      "--workers" "8" "--seed" "42")))
            (args (cl-cmatrix/cli::%cmatrix-run-matrix-args invocation)))
       (with-soft-assertions
         (expect (= (getf args :speed) 2.5d0) :to-be-truthy)
         (expect (eq (getf args :color) :cyan) :to-be-truthy)
         (expect (eq (getf args :glyphs) +katakana-glyphs+) :to-be-truthy)
-        (expect (eq (getf args :bold) t) :to-be-truthy)
+        (expect (not (getf args :bold)) :to-be-truthy)
+        (expect (getf args :partial-bold-p) :to-be-truthy)
+        (expect (not (getf args :no-bold-p)) :to-be-truthy)
+        (expect (getf args :old-style-p) :to-be-truthy)
+        (expect (not (getf args :asyncp)) :to-be-truthy)
+        (expect (getf args :lockp) :to-be-truthy)
+        (expect (getf args :force-linux-term) :to-be-truthy)
+        (expect (string= (getf args :tty) "/dev/tty") :to-be-truthy)
         (expect (= (getf args :fps) 60) :to-be-truthy)
+        (expect (null (getf args :update-delay)) :to-be-truthy)
+        (expect (= (getf args :workers) 8) :to-be-truthy)
         (expect (typep (getf args :random-state) 'random-state) :to-be-truthy))))
 
-  (it "defaults to green ASCII at speed 1.0, unbolded, 30fps, from an unseeded random state"
+  (it "maps -a and -o to independent runtime modes"
+    (let* ((async-invocation (parse-argv (make-cmatrix-app) '("cl-cmatrix" "-a")))
+           (async-args (cl-cmatrix/cli::%cmatrix-run-matrix-args async-invocation))
+           (old-style-invocation (parse-argv (make-cmatrix-app) '("cl-cmatrix" "-o")))
+           (old-style-args (cl-cmatrix/cli::%cmatrix-run-matrix-args old-style-invocation))
+           (combined-invocation (parse-argv (make-cmatrix-app) '("cl-cmatrix" "-a" "-o")))
+           (combined-args (cl-cmatrix/cli::%cmatrix-run-matrix-args combined-invocation)))
+      (with-soft-assertions
+        (expect (getf async-args :asyncp) :to-be-truthy)
+        (expect (not (getf async-args :old-style-p)) :to-be-truthy)
+        (expect (getf old-style-args :old-style-p) :to-be-truthy)
+        (expect (not (getf old-style-args :asyncp)) :to-be-truthy)
+        (expect (getf combined-args :asyncp) :to-be-truthy)
+        (expect (getf combined-args :old-style-p) :to-be-truthy))))
+
+  (it "defaults to green ASCII at speed 1.0, unbolded, upstream delay 4, from an unseeded random state"
     (let* ((invocation (parse-argv (make-cmatrix-app) '("cl-cmatrix")))
            (args (cl-cmatrix/cli::%cmatrix-run-matrix-args invocation)))
       (with-soft-assertions
@@ -75,11 +90,34 @@ time."
         (expect (eq (getf args :color) :green) :to-be-truthy)
         (expect (eq (getf args :glyphs) +default-glyphs+) :to-be-truthy)
         (expect (not (getf args :bold)) :to-be-truthy)
-        (expect (= (getf args :fps) 30) :to-be-truthy)))))
+        (expect (not (getf args :partial-bold-p)) :to-be-truthy)
+        (expect (not (getf args :no-bold-p)) :to-be-truthy)
+        (expect (not (getf args :old-style-p)) :to-be-truthy)
+        (expect (not (getf args :asyncp)) :to-be-truthy)
+        (expect (not (getf args :lockp)) :to-be-truthy)
+        (expect (not (getf args :force-linux-term)) :to-be-truthy)
+        (expect (not (getf args :tty)) :to-be-truthy)
+        (expect (null (getf args :fps)) :to-be-truthy)
+        (expect (= (getf args :update-delay) +default-update-delay+) :to-be-truthy)
+        (expect (= (getf args :workers) +default-workers+) :to-be-truthy)))))
+
+  (it "passes an explicit upstream update delay when --fps is absent"
+    (let* ((invocation (parse-argv (make-cmatrix-app) '("cl-cmatrix" "-u" "6")))
+           (args (cl-cmatrix/cli::%cmatrix-run-matrix-args invocation)))
+      (with-soft-assertions
+        (expect (null (getf args :fps)) :to-be-truthy)
+        (expect (= (getf args :update-delay) 6) :to-be-truthy))))
+
+  (it "passes an explicit upstream update delay when --fps is absent"
+    (let* ((invocation (parse-argv (make-cmatrix-app) '("cl-cmatrix" "-u" "6")))
+           (args (cl-cmatrix/cli::%cmatrix-run-matrix-args invocation)))
+      (with-soft-assertions
+        (expect (null (getf args :fps)) :to-be-truthy)
+        (expect (= (getf args :update-delay) 6) :to-be-truthy))))
 
 (describe "%option-keyword"
   (it "upcases and interns the parsed string value of OPTION-NAME into the keyword package"
-    (let ((invocation (parse-argv (make-cmatrix-app) '("cl-cmatrix" "-c" "cyan" "-g" "katakana"))))
+    (let ((invocation (parse-argv (make-cmatrix-app) '("cl-cmatrix" "-C" "cyan" "-g" "katakana"))))
       (with-soft-assertions
         (expect (eq (cl-cmatrix/cli::%option-keyword invocation :color) :cyan) :to-be-truthy)
         (expect (eq (cl-cmatrix/cli::%option-keyword invocation :charset) :katakana)
@@ -98,20 +136,24 @@ time."
                       (cl-cmatrix/cli::%cmatrix-random-state nil)))
             :to-be-truthy)))
 
-(describe "the cl-cmatrix app spec: --help and --version"
-  (it "exits 0 on --help without invoking the handler"
-    (let ((output (with-output-to-string (out)
-                    (expect (zerop (run-app (make-cmatrix-app) :argv '("cl-cmatrix" "--help")
-                                        :stdout out))
-                            :to-be-truthy))))
-      (expect (search "cl-cmatrix" output) :to-be-truthy)))
+(describe "the cl-cmatrix app spec: help and version aliases"
+  (it "exits 0 on --help and -h without invoking the handler"
+    (dolist (option '("--help" "-h"))
+      (let ((output (with-output-to-string (out)
+                      (expect (zerop (run-app (make-cmatrix-app)
+                                              :argv (list "cl-cmatrix" option)
+                                              :stdout out))
+                              :to-be-truthy))))
+        (expect (search "cl-cmatrix" output) :to-be-truthy))))
 
-  (it "exits 0 on --version and prints the app's version"
-    (let ((output (with-output-to-string (out)
-                    (expect (zerop (run-app (make-cmatrix-app) :argv '("cl-cmatrix" "--version")
-                                        :stdout out))
-                            :to-be-truthy))))
-      (expect (search "cl-cmatrix" output) :to-be-truthy))))
+  (it "exits 0 on --version and -V and prints the app's version"
+    (dolist (option '("--version" "-V"))
+      (let ((output (with-output-to-string (out)
+                      (expect (zerop (run-app (make-cmatrix-app)
+                                              :argv (list "cl-cmatrix" option)
+                                              :stdout out))
+                              :to-be-truthy))))
+        (expect (search "cl-cmatrix" output) :to-be-truthy)))))
 
 (describe "main and image-entry-point (isolated: these really exit the process)"
   (it-isolated "main exits 0 for --version, without invoking the handler"

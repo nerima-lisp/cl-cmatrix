@@ -55,6 +55,148 @@ the randomness)"
       (matrix-advance state)
       (expect (eq (matrix-state-columns state) columns-before) :to-be-truthy)))
 
+  (it "shifts old-style rows downward while preserving glyph metadata"
+    (let* ((column (cl-cmatrix::%make-old-style-column
+                     :interval 1 :counter 0
+                     :glyphs (vector #\a #\b #\c)
+                     :glyph-bold-p (vector t nil t)
+                     :spaces 1))
+           (advanced (cl-cmatrix::%old-style-column-fall-one-row
+                      column (coerce '(#\X #\Y) 'simple-vector)
+                      (sb-ext:seed-random-state 62)
+                      :interval 1)))
+      (expect (equal (coerce (old-style-column-glyphs advanced) 'list)
+                     '(nil #\a #\b))
+              :to-be-truthy)
+      (expect (equal (coerce (old-style-column-glyph-bold-p advanced) 'list)
+                     '(nil t nil))
+              :to-be-truthy)
+      (expect (= (old-style-column-spaces advanced) 0) :to-be-truthy)))
+
+  (it "looks up old-style glyphs only inside the visible row vector"
+    (let ((column (cl-cmatrix::%make-old-style-column
+                    :glyphs (vector #\a nil #\c)
+                    :glyph-bold-p (vector nil nil nil))))
+      (with-soft-assertions
+        (expect (null (old-style-column-glyph-at-row column -1)) :to-be-truthy)
+        (expect (char= (old-style-column-glyph-at-row column 0) #\a) :to-be-truthy)
+        (expect (null (old-style-column-glyph-at-row column 1)) :to-be-truthy)
+        (expect (char= (old-style-column-glyph-at-row column 2) #\c) :to-be-truthy)
+        (expect (null (old-style-column-glyph-at-row column 3)) :to-be-truthy))))
+
+  (it "fills missing normal-column bold metadata from glyph parity"
+    (let* ((column (cl-cmatrix::%make-column
+                     :length 4
+                     :glyphs (vector #\a #\b #\c)))
+           (bold-p (cl-cmatrix::%copy-glyph-bold-p column)))
+      (expect (equal (coerce bold-p 'list) '(nil t nil nil))
+              :to-be-truthy)))
+
+  (it "replaces every existing old-style glyph while preserving column metadata"
+    (let* ((column (cl-cmatrix::%make-old-style-column
+                     :interval 2 :counter 1
+                     :glyphs (vector #\a nil #\c)
+                     :glyph-bold-p (vector nil t nil)
+                     :spaces 4))
+           (replaced (cl-cmatrix::%old-style-column-with-glyphs
+                      column (coerce '(#\X #\Y) 'simple-vector)
+                      (sb-ext:seed-random-state 17))))
+      (with-soft-assertions
+        (expect (member (svref (old-style-column-glyphs replaced) 0) '(#\X #\Y))
+                :to-be-truthy)
+        (expect (null (svref (old-style-column-glyphs replaced) 1)) :to-be-truthy)
+        (expect (member (svref (old-style-column-glyphs replaced) 2) '(#\X #\Y))
+                :to-be-truthy)
+        (expect (= (old-style-column-interval replaced) 2) :to-be-truthy)
+        (expect (= (old-style-column-counter replaced) 1) :to-be-truthy)
+        (expect (= (old-style-column-spaces replaced) 4) :to-be-truthy))))
+
+  (it "repaints shifted old-style glyphs when CHANGE-GLYPHS-P is enabled"
+    (let* ((column (cl-cmatrix::%make-old-style-column
+                     :glyphs (vector #\a #\b #\c)
+                     :glyph-bold-p (vector nil nil nil)
+                     :spaces 1))
+           (advanced (cl-cmatrix::%old-style-column-fall-one-row
+                      column (coerce '(#\X #\Y) 'simple-vector)
+                      (sb-ext:seed-random-state 62)
+                      :interval 1 :change-glyphs-p t)))
+      (with-soft-assertions
+        (expect (null (svref (old-style-column-glyphs advanced) 0)) :to-be-truthy)
+        (expect (member (svref (old-style-column-glyphs advanced) 1) '(#\X #\Y))
+                :to-be-truthy)
+        (expect (member (svref (old-style-column-glyphs advanced) 2) '(#\X #\Y))
+                :to-be-truthy))))
+
+  (it "takes both old-style respawn paths when there are no visible spaces"
+    (let ((saw-space nil)
+          (saw-glyph nil))
+      (loop for seed from 1 to 64
+            for advanced = (cl-cmatrix::%old-style-column-fall-one-row
+                            (cl-cmatrix::%make-old-style-column
+                             :glyphs (vector nil nil)
+                             :glyph-bold-p (vector nil nil)
+                             :spaces 0)
+                            (coerce '(#\X #\Y) 'simple-vector)
+                            (sb-ext:seed-random-state seed)
+                            :interval 1)
+            do (if (plusp (old-style-column-spaces advanced))
+                   (setf saw-space t)
+                   (setf saw-glyph (or saw-glyph
+                                       (not (null (svref (old-style-column-glyphs advanced) 0)))))))
+      (expect (and saw-space saw-glyph) :to-be-truthy)))
+
+  (it "uses the synchronous interval when advancing an old-style column"
+    (let* ((column (cl-cmatrix::%make-old-style-column
+                     :interval 10 :counter 0
+                     :glyphs (vector #\a)
+                     :glyph-bold-p (vector nil)
+                     :spaces 1))
+           (advanced (cl-cmatrix::%advance-old-style-column
+                      column (coerce '(#\X #\Y) 'simple-vector)
+                      (sb-ext:seed-random-state 19)
+                      4 3 :asyncp nil)))
+      (with-soft-assertions
+        (expect (= (old-style-column-interval advanced) 1) :to-be-truthy)
+        (expect (= (old-style-column-counter advanced) 0) :to-be-truthy))))
+
+  (it "waits for an asynchronous old-style interval before falling"
+    (let* ((column (cl-cmatrix::%make-old-style-column
+                     :interval 3 :counter 0
+                     :glyphs (vector #\a)
+                     :glyph-bold-p (vector nil)
+                     :spaces 1))
+           (advanced (cl-cmatrix::%advance-old-style-column
+                      column (coerce '(#\X #\Y) 'simple-vector)
+                      (sb-ext:seed-random-state 19)
+                      1 3 :asyncp t)))
+      (with-soft-assertions
+        (expect (= (old-style-column-interval advanced) 3) :to-be-truthy)
+        (expect (= (old-style-column-counter advanced) 1) :to-be-truthy))))
+
+  (it "resizes old-style glyph and bold metadata vectors without changing other fields"
+    (let* ((column (cl-cmatrix::%make-old-style-column
+                     :interval 2 :counter 1 :spaces 3
+                     :glyphs (vector #\a #\b #\c)
+                     :glyph-bold-p (vector t nil t)))
+           (short (cl-cmatrix::%resize-old-style-column column 2))
+           (long (cl-cmatrix::%resize-old-style-column column 5)))
+      (with-soft-assertions
+        (expect (equal (coerce (old-style-column-glyphs short) 'list)
+                       '(#\a #\b))
+                :to-be-truthy)
+        (expect (equal (coerce (old-style-column-glyph-bold-p short) 'list)
+                       '(t nil))
+                :to-be-truthy)
+        (expect (equal (coerce (old-style-column-glyphs long) 'list)
+                       '(#\a #\b #\c nil nil))
+                :to-be-truthy)
+        (expect (equal (coerce (old-style-column-glyph-bold-p long) 'list)
+                       '(t nil t nil nil))
+                :to-be-truthy)
+        (expect (= (old-style-column-interval long) 2) :to-be-truthy)
+        (expect (= (old-style-column-counter long) 1) :to-be-truthy)
+        (expect (= (old-style-column-spaces long) 3) :to-be-truthy))))
+
   (it "respawns a column once its whole trail has scrolled past the visible height"
     ;; height 1, trail length at least +MIN-TRAIL-LENGTH+ (3): after enough
     ;; ticks the single column must have wrapped around at least once, so

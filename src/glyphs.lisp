@@ -38,10 +38,15 @@ characters) -- the closest a Unicode terminal font gets to the classic
   "A two-character glyph set of just #\\0 and #\\1, for a stark binary-rain
 look.")
 
+(defparameter +lambda-glyphs+
+  (vector (code-char #x3bb) (code-char #x39b) #\l #\L)
+  "A compact lambda glyph set for the classic hacker-rain look.")
+
 (defun %build-charsets ()
   (list (cons :ascii +default-glyphs+)
         (cons :katakana +katakana-glyphs+)
-        (cons :binary +binary-glyphs+)))
+        (cons :binary +binary-glyphs+)
+        (cons :lambda +lambda-glyphs+)))
 
 (defparameter +charsets+ (%build-charsets)
   "Maps a --charset CLI name to its glyph SIMPLE-VECTOR. :ASCII (the
@@ -61,3 +66,8 @@ SIMPLE-VECTOR), using RANDOM-STATE. Injecting RANDOM-STATE rather than
 consulting *RANDOM-STATE* is what makes a whole MATRIX-STATE's glyph choices
 reproducible from a fixed seed."
   (aref glyphs (random (length glyphs) random-state)))
+
+(defun %random-glyph-with-parity (glyphs random-state)
+  "Return a random glyph and the upstream-compatible partial-bold bit."
+  (let ((glyph (random-glyph glyphs random-state)))
+    (values glyph (evenp (char-code glyph)))))

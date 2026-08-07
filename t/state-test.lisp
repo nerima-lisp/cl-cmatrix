@@ -42,6 +42,17 @@
                                       :random-state (sb-ext:seed-random-state 50))))
       (expect (eq (matrix-state-glyphs state) glyphs) :to-be-truthy)))
 
+  (it "builds fixed-height old-style columns"
+    (let ((state (make-matrix-state 7 9 :old-style-p t
+                                     :random-state (sb-ext:seed-random-state 61))))
+      (expect (matrix-state-old-style-p state) :to-be-truthy)
+      (expect (every (lambda (column)
+                       (and (old-style-column-p column)
+                            (= (length (old-style-column-glyphs column)) 9)
+                            (= (length (old-style-column-glyph-bold-p column)) 9)))
+                     (matrix-state-columns state))
+              :to-be-truthy)))
+
   (it-each ((0 10) (10 -1))
       "signals INVALID-DIMENSIONS for width ~A height ~A"
       (width height)
@@ -49,6 +60,10 @@
 
   (it "signals INVALID-SPEED for a non-positive speed"
     (expect (signals invalid-speed (make-matrix-state 4 4 :speed 0)) :to-be-truthy))
+
+  (it "signals INVALID-SPEED for a non-real speed"
+    (expect (signals invalid-speed (make-matrix-state 4 4 :speed :fast))
+            :to-be-truthy))
 
   (it "signals UNKNOWN-COLOR-SCHEME for an unregistered color, before spawning any column"
     (expect (signals unknown-color-scheme (make-matrix-state 4 4 :color :not-a-scheme))

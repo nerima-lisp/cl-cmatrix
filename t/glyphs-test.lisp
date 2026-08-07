@@ -35,10 +35,16 @@
   (it "is exactly #\\0 and #\\1"
     (expect (equalp +binary-glyphs+ #(#\0 #\1)) :to-be-truthy)))
 
+(describe "+lambda-glyphs+"
+  (it "starts with lambda glyphs and keeps ASCII fallbacks"
+    (with-soft-assertions
+      (expect (char= (aref +lambda-glyphs+ 0) (code-char #x3bb)) :to-be-truthy)
+      (expect (equalp (subseq +lambda-glyphs+ 2) #(#\l #\L)) :to-be-truthy))))
+
 (describe "list-charsets"
   (it "names every registered charset, each a valid CHARSET-P"
     (with-soft-assertions
-      (expect (equal (list-charsets) '(:ascii :katakana :binary)) :to-be-truthy)
+      (expect (equal (list-charsets) '(:ascii :katakana :binary :lambda)) :to-be-truthy)
       (expect (every #'charset-p (list-charsets)) :to-be-truthy)
       (expect (not (charset-p :not-a-charset)) :to-be-truthy))))
 
@@ -51,6 +57,9 @@
 
   (it "resolves :binary to +binary-glyphs+"
     (expect (eq (charset-glyphs :binary) +binary-glyphs+) :to-be-truthy))
+
+  (it "resolves :lambda to +lambda-glyphs+"
+    (expect (eq (charset-glyphs :lambda) +lambda-glyphs+) :to-be-truthy))
 
   (it "signals UNKNOWN-CHARSET for an unregistered name"
     (expect (signals unknown-charset (charset-glyphs :not-a-charset)) :to-be-truthy))

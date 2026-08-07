@@ -1,32 +1,15 @@
 ;;;; src/cli.lisp
 ;;;;
 ;;;; The `cl-cmatrix` command line: a single root command (no subcommands)
-;;;; exposing --speed, --color, --charset, --bold, --fps, and --seed over
-;;;; RUN-MATRIX, with --help/--version scaffolding free from cl-cli. Unlike
+;;;; exposing the classic cmatrix controls plus --speed, --color, --charset,
+;;;; --bold, --fps, --workers, and --seed over RUN-MATRIX, with
+;;;; --help/--version scaffolding free from cl-cli. Unlike
 ;;;; cl-cowsay this is a persistent, full-screen, raw-mode loop rather than a
 ;;;; one-shot print, so the handler has no output to print itself:
 ;;;; RUN-MATRIX writes directly to the terminal and returns only once the
 ;;;; user quits.
 
 (in-package #:cl-cmatrix/cli)
-
-(defun %cmatrix-version ()
-  "The running CL-CMATRIX system's :VERSION, the single source of truth also
-read by flake.nix and enforced by release.yml against the git tag."
-  (let ((system (asdf:find-system "cl-cmatrix" nil)))
-    (if system (asdf:component-version system) "0.0.0")))
-
-(defun %cmatrix-color-choices ()
-  "Every --color choice: each registered scheme name plus \"rainbow\", the
-one --color value RUN-MATRIX accepts that names no single scheme (see
-COLOR-CHOICE-P in color-scheme.lisp)."
-  (append (mapcar (lambda (name) (string-downcase (symbol-name name))) (list-color-schemes))
-          (list "rainbow")))
-
-(defun %cmatrix-charset-choices ()
-  "Every --charset choice: the downcased name of each registered glyph set
-(see LIST-CHARSETS in glyphs.lisp)."
-  (mapcar (lambda (name) (string-downcase (symbol-name name))) (list-charsets)))
 
 (defun %cmatrix-random-state (seed)
   "Return a fresh random state for RUN-MATRIX's :RANDOM-STATE: seeded from
@@ -56,15 +39,79 @@ and --seed threaded through %CMATRIX-RANDOM-STATE. Pure given INVOCATION,
 like %TERMINAL-DIMENSIONS and %MAKE-INITIAL-RUN-STATE in run-state.lisp -- the
 only impure step left in %CMATRIX-HANDLER is applying RUN-MATRIX to this
 plist, which is what actually takes over the terminal."
-  (list :speed (option-value invocation :speed)
-        :color (%option-keyword invocation :color)
-        :glyphs (charset-glyphs (%option-keyword invocation :charset))
-        :bold (option-value invocation :bold)
-        :fps (option-value invocation :fps)
-        :random-state (%cmatrix-random-state (option-value invocation :seed))))
+  (let* ((all-bold-p (option-value invocation :all-bold))
+         (partial-bold-p (option-value invocation :bold))
+         (no-bold-p (option-value invocation :no-bold))
+         (random-bold-p (option-value invocation :random-bold))
+         (rainbow-p (option-value invocation :rainbow))
+         (japanese-p (option-value invocation :japanese))
+         (lambda-p (option-value invocation :lambda))
+         (async-p (option-value invocation :async))
+         (old-style-p (option-value invocation :old-style))
+         (fps-p (eq (option-value-source invocation :fps) :command-line)))
+    (list :speed (option-value invocation :speed)
+          :color (if rainbow-p :rainbow
+                     (%option-keyword invocation :color))
+          :glyphs (cond
+                    (lambda-p (charset-glyphs :lambda))
+                    (japanese-p (charset-glyphs :katakana))
+                    (t (charset-glyphs (%option-keyword invocation :charset))))
+          :bold (and all-bold-p
+                     (not no-bold-p)
+                     (not random-bold-p))
+          :partial-bold-p (and partial-bold-p
+                               (not all-bold-p)
+                               (not no-bold-p)
+                               (not random-bold-p))
+          :no-bold-p no-bold-p
+          :old-style-p old-style-p
+          :asyncp async-p
+          :random-bold-p (and random-bold-p (not all-bold-p)
+                              (not partial-bold-p) (not no-bold-p))
+          :change-glyphs-p (option-value invocation :change-glyphs)
+          :screensaverp (option-value invocation :screensaver)
+          :lockp (option-value invocation :lock)
+          :message (option-value invocation :message)
+          :tty (option-value invocation :tty)
+          :force-linux-term (option-value invocation :force-linux-term)
+          :fps (when fps-p (option-value invocation :fps))
+          :update-delay (unless fps-p
+                          (option-value invocation :update-delay))
+          :workers (option-value invocation :workers)
+          :random-state (%cmatrix-random-state (option-value invocation :seed)))))
+
+(defun %cmatrix-run-with-terminal (args)
+  "Apply RUN-MATRIX ARGS, optionally using a named terminal stream.
+
+The TTY stream remains open for the complete RUN-MATRIX call, so raw-mode
+restoration and the realtime poller both address the same descriptor."
+  (let ((tty (getf args :tty)))
+    (remf args :tty)
+    (if tty
+        (with-open-file (terminal tty
+                                 :direction :io
+                                 :element-type 'character
+                                 :if-does-not-exist nil)
+          (unless terminal
+            (error "Cannot open tty ~A." tty))
+          (let ((fd (stream-fd terminal)))
+            (unless fd
+              (error "Cannot determine the file descriptor for tty ~A." tty))
+            (apply #'run-matrix
+                   (list* :stream terminal
+                          :input-stream terminal
+                          :fd fd
+                          args))))
+        (apply #'run-matrix args))))
 
 (defun %cmatrix-handler (invocation)
-  (apply #'run-matrix (%cmatrix-run-matrix-args invocation))
+  (let* ((args (%cmatrix-run-matrix-args invocation))
+         (force-linux-term (getf args :force-linux-term)))
+    (remf args :force-linux-term)
+    (if force-linux-term
+        (with-environment-variables (("TERM" "linux"))
+          (%cmatrix-run-with-terminal args))
+        (%cmatrix-run-with-terminal args)))
   0)
 
 (defun make-cmatrix-app ()
@@ -80,31 +127,7 @@ stream per terminal column, each with a bright head and a color-graded
 dimming trail. Reflows automatically on terminal resize. Press q, Escape, or
 Ctrl-C to quit."
    :global-options
-   (list (make-option :name "speed" :short #\s :kind :value :type :float
-                       :min 0.1d0 :default 1.0d0
-                       :description "Fall speed multiplier; larger falls faster (default 1.0).")
-         (make-option :name "color" :short #\c :kind :value
-                       :choices (%cmatrix-color-choices)
-                       :default "green"
-                       :description
-                       "Trail color scheme, or \"rainbow\" for a different
-scheme per column (default green).")
-         (make-option :name "charset" :short #\g :kind :value
-                       :choices (%cmatrix-charset-choices)
-                       :default "ascii"
-                       :description
-                       "Falling glyph set: ascii, katakana (half-width), or
-binary (0/1) (default ascii).")
-         (make-option :name "bold" :short #\b :kind :flag
-                      :description "Render the whole trail bold, not only the head (default off).")
-         (make-option :name "fps" :short #\u :kind :value :type :integer
-                      :min 1 :max 240 :default +default-fps+
-                      :description "Ticks per second (default 30).")
-         (make-option :name "seed" :kind :value :type :integer
-                      :min 0
-                      :description
-                      "Random seed for a reproducible run (default: a new
-random run every time)."))
+   (make-cmatrix-options)
    :handler #'%cmatrix-handler))
 
 (defun main (&optional (argv (current-process-argv)))
