@@ -3,8 +3,7 @@
 (in-package #:cl-cmatrix/test)
 
 (describe "make-matrix-state"
-  (it "builds WIDTH columns, remembers the dimensions and injected RANDOM-STATE, and starts at
-tick 0"
+  (it "builds WIDTH columns, copies RANDOM-STATE, and starts at tick 0"
     (let* ((random-state (sb-ext:seed-random-state 1))
            (state (make-matrix-state 6 10 :random-state random-state)))
       (with-soft-assertions
@@ -12,7 +11,8 @@ tick 0"
         (expect (= (matrix-state-height state) 10) :to-be-truthy)
         (expect (= (length (matrix-state-columns state)) 6) :to-be-truthy)
         (expect (= (matrix-state-tick state) 0) :to-be-truthy)
-        (expect (eq (matrix-state-random-state state) random-state) :to-be-truthy))))
+        (expect (not (eq (matrix-state-random-state state) random-state))
+                :to-be-truthy))))
 
   (it "spawns every column with its head at or above row 0"
     (let ((state (make-matrix-state 20 24 :random-state (sb-ext:seed-random-state 2))))

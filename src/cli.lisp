@@ -53,7 +53,7 @@ function is never called with any other OPTION-NAME."
 every cl-cli option read back through OPTION-VALUE, with --color/--charset
 interned via %OPTION-KEYWORD, --charset further resolved to its glyph vector,
 and --seed threaded through %CMATRIX-RANDOM-STATE. Pure given INVOCATION,
-like %TERMINAL-DIMENSIONS and %MAKE-INITIAL-RUN-STATE in loop.lisp -- the
+like %TERMINAL-DIMENSIONS and %MAKE-INITIAL-RUN-STATE in run-state.lisp -- the
 only impure step left in %CMATRIX-HANDLER is applying RUN-MATRIX to this
 plist, which is what actually takes over the terminal."
   (list :speed (option-value invocation :speed)

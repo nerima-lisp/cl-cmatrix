@@ -19,7 +19,7 @@
    ;; Property-based testing: generated cases plus automatic shrinking on
    ;; failure, for invariants that must hold across a whole input space
    ;; rather than only the hand-picked examples the other IT cases cover.
-   #:it-property #:gen-integer #:gen-member)
+   #:it-property #:gen-integer #:gen-member #:gen-state-machine)
   (:import-from #:cl-cmatrix/cli
    #:make-cmatrix-app
    #:main
@@ -39,7 +39,10 @@
    #:cell-style
    #:make-renderer
    #:renderer-width
-   #:renderer-height)
+   #:renderer-height
+   #:make-key-event
+   #:make-stream-input-poller
+   #:key-event-code)
   (:export #:run-tests))
 
 (in-package #:cl-cmatrix/test)

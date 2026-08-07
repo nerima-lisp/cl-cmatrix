@@ -24,59 +24,50 @@
     };
 
     cl-weave = {
-      url = "github:nerima-lisp/cl-weave/v1.2.0";
+      url = "github:nerima-lisp/cl-weave/v1.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # Raw mode, the alternate screen, 256-color styling, the double-buffered
-    # renderer, and the real-time tick loop, used by src/loop.lisp and
-    # src/render.lisp. v1.1.0 was the first tag carrying src/tick-loop.lisp
-    # (TICK-LOOP-RUN-REALTIME), which this project's animation loop depends
-    # on directly; pinned to the current latest release since. v1.4.0 grew
-    # TICK-LOOP-RUN-REALTIME's own :POLL argument, which src/loop.lisp now
-    # drives with RUN-STATE-POLL (terminal size/quit-key observation) ahead
-    # of RUN-STATE-ADVANCE (the pure MATRIX-ADVANCE step) every tick, and
-    # WITH-SCREEN-BATCH, which src/render.lisp now wraps MATRIX-DRAW's whole
-    # frame in -- both added specifically for this project's "many small
-    # per-cell writes every tick" shape, per v1.4.0's own CHANGELOG.
+    # renderer, the real-time tick loop, and typed input events used by
+    # src/input.lisp and src/run-state.lisp. v1.5.0 also exposes
+    # MAKE-STREAM-INPUT-POLLER, so input handling consumes KEY-EVENT values
+    # directly instead of polling raw characters.
     cl-tty-kit = {
-      url = "github:nerima-lisp/cl-tty-kit/v1.4.0";
+      url = "github:nerima-lisp/cl-tty-kit/v1.5.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Not a dependency this package names anywhere: cl-tty-kit v1.2.0 grew a
-    # `:depends-on ("cl-codec-kit")`, and cl-tty-kit's package installs only
-    # its OWN source tree, so putting it on this build's registry leaves ASDF
-    # unable to resolve that edge -- `Component "cl-codec-kit" not found,
-    # required by #<SYSTEM "cl-tty-kit">`. Dependency-free itself.
-    # `flake = false`: consumed as a SOURCE TREE and built here, not read from
-    # its own `packages` output. cl-codec-kit has not cut a release declaring
-    # aarch64-darwin, so reading `packages.${system}` would fail on macOS; a
-    # source tree has no platform at all. This is ADR-0079's default shape --
-    # a non-flake input also contributes no second nixpkgs to flake.lock.
+    # cl-tty-kit v1.5.0 declares this runtime system directly. It is built from
+    # source below so the complete dependency ancestry is visible to
+    # cl-nix-forge on every supported platform.
     cl-codec-kit = {
-      url = "github:nerima-lisp/cl-codec-kit/v0.4.0";
+      url = "github:nerima-lisp/cl-codec-kit/v0.5.0";
+      flake = false;
+    };
+
+    # cl-tty-kit's transitive runtime closure. Keep these versions aligned with
+    # cl-tty-kit v1.5.0 rather than relying on a sibling flake's registry.
+    cl-host-kit = {
+      url = "github:nerima-lisp/cl-host-kit/v0.3.1";
+      flake = false;
+    };
+    cl-boundary-kit = {
+      url = "github:nerima-lisp/cl-boundary-kit/v2.3.0";
+      flake = false;
+    };
+    cl-date-kit = {
+      url = "github:nerima-lisp/cl-date-kit/v1.0.0";
+      flake = false;
+    };
+    cl-concurrent-kit = {
+      url = "github:nerima-lisp/cl-concurrent-kit/v0.6.1";
       flake = false;
     };
 
     # Declarative CLI parsing plus --help/--version scaffolding, used by
-    # src/cli.lisp. Also cl-cmatrix's ONLY route to cl-host-kit (QUIT, GETCWD
-    # and TRUENAMIZE, used by src/cli.lisp and scripts/coverage-entry.lisp in
-    # place of ASDF's own bundled UIOP): cl-cli's own `:depends-on` names
-    # "cl-host-kit" too, and unlike cl-tty-kit below, cl-cli's package is
-    # passed to `lispDependencies` PLAIN rather than through
-    # `ctx.cl.fromDerivation` -- see that comment for why the distinction
-    # matters -- so it carries a real `passthru.ancestry` cl-nix-forge's
-    # dependency walk reads. cl-host-kit's own registry entry from inside
-    # cl-cli's closure is therefore already reachable from here; declaring it
-    # AGAIN as this flake's own separate input and `lispDerivation` call
-    # (tried on 2026-08-03, reverted 2026-08-04) builds a second "cl-host-kit"
-    # with a different `cl-nix-forge` dedup key -- it is keyed on the whole
-    # build context (implementation, dependency closure, CL_SOURCE_REGISTRY),
-    # not source-tree identity alone -- which `mkExecutable`'s `installSource`
-    # then refuses outright: "cl-host-kit names more than one of them". Never
-    # observed locally because this machine only ever checks aarch64-darwin;
-    # only surfaced once CI first ran this flake on x86_64-linux.
+    # src/cli.lisp. cl-cli remains a separately built sibling because its
+    # package already carries its own ASDF ancestry.
     cl-cli = {
       url = "github:nerima-lisp/cl-cli/v1.3.0";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -96,6 +87,10 @@
       cl-weave,
       cl-tty-kit,
       cl-codec-kit,
+      cl-host-kit,
+      cl-boundary-kit,
+      cl-date-kit,
+      cl-concurrent-kit,
       cl-cli,
       treefmt-nix,
     }:
@@ -122,6 +117,41 @@
         platforms = lib.platforms.unix;
         mainProgram = "cl-cmatrix";
       };
+
+      clHostKit = ctx: ctx.cl.lispDerivation {
+        lispSystem = "cl-host-kit";
+        version = ctx.cl.fromAsdSystem "${cl-host-kit}/cl-host-kit.asd";
+        src = cl-host-kit;
+      };
+
+      clBoundaryKit = ctx: ctx.cl.lispDerivation {
+        lispSystem = "cl-boundary-kit";
+        version = ctx.cl.fromAsdSystem "${cl-boundary-kit}/cl-boundary-kit.asd";
+        src = cl-boundary-kit;
+        lispDependencies = [ (clHostKit ctx) ];
+      };
+
+      clDateKit = ctx: ctx.cl.lispDerivation {
+        lispSystem = "cl-date-kit";
+        version = ctx.cl.fromAsdSystem "${cl-date-kit}/cl-date-kit.asd";
+        src = cl-date-kit;
+      };
+
+      clConcurrentKit = ctx: ctx.cl.lispDerivation {
+        lispSystem = "cl-concurrent-kit";
+        version = ctx.cl.fromAsdSystem "${cl-concurrent-kit}/cl-concurrent-kit.asd";
+        src = cl-concurrent-kit;
+        lispDependencies = [
+          (clBoundaryKit ctx)
+          (clDateKit ctx)
+        ];
+      };
+
+      clCodecKit = ctx: ctx.cl.lispDerivation {
+        lispSystem = "cl-codec-kit";
+        version = ctx.cl.fromAsdSystem "${cl-codec-kit}/cl-codec-kit.asd";
+        src = cl-codec-kit;
+      };
     in
     # `mkPackageFlake` spans systems -- it obtains a `pkgs` and its own
     # cl-nix-forge instance per entry in `systems` -- so the per-system `lib`
@@ -145,29 +175,20 @@
       # `self`. `./.` is the same directory.
       root = ./.;
 
-      # cl-tty-kit and cl-cli are BUILT DERIVATIONS (each sibling's ASDF
-      # system, from its own flake's `packages.<system>`), not source
-      # directories -- putting a sibling's uncompiled source on the registry
-      # instead would have ASDF try to write fasls next to it, inside the
-      # read-only Nix store.
-      # `fromDerivation` on cl-tty-kit, plain on cl-cli. The two siblings are
-      # built by different machinery: cl-cli's flake is a `mkPackageFlake`
-      # adopter, so its package carries the `passthru.ancestry` cl-nix-forge's
-      # deduplicating registry walk reads (which is also how cl-host-kit,
-      # cl-cli's own dependency, reaches this build without a separate entry
-      # here -- see cl-cli's own input comment above), while cl-tty-kit still
-      # builds its own package with nixpkgs' `pkgs.sbcl.buildASDFSystem`,
-      # which does not. Passing the latter straight through fails evaluation
-      # with `attribute 'ancestry' missing`; `fromDerivation` is
-      # cl-nix-forge's own adapter for exactly that -- a package it did not
-      # build and about which it can assume nothing. cl-regex-kit wraps
-      # cl-weave the same way.
+      # Source-based sibling systems are built as lispDerivations so their
+      # ASDF ancestry is explicit. The pre-built cl-tty-kit package needs
+      # fromDerivation because it comes from a sibling flake; its dependency
+      # systems are supplied directly rather than left to ASDF discovery.
       lispDependencies = ctx: [
-        (ctx.cl.fromDerivation { drv = cl-tty-kit.packages.${ctx.system}.cl-tty-kit; })
-        (ctx.cl.lispDerivation {
-          lispSystem = "cl-codec-kit";
-          version = ctx.cl.fromAsdSystem "${cl-codec-kit}/cl-codec-kit.asd";
-          src = cl-codec-kit;
+        (ctx.cl.fromDerivation {
+          drv = cl-tty-kit.packages.${ctx.system}.cl-tty-kit;
+          lispDependencies = [
+            (clCodecKit ctx)
+            (clConcurrentKit ctx)
+            (clBoundaryKit ctx)
+            (clDateKit ctx)
+            (clHostKit ctx)
+          ];
         })
         cl-cli.packages.${ctx.system}.cl-cli
       ];

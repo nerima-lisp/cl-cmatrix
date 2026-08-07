@@ -32,7 +32,12 @@ itself SBCL-only). See docs/src/reference/compatibility.md for details.")
                 #:renderer-resize
                 #:tick-loop-run-realtime
                 #:with-terminal-session
-                #:terminal-size)
+                #:terminal-size
+                #:make-stream-input-poller
+                #:key-event
+                #:key-event-type
+                #:key-event-code
+                #:key-event-kind)
   (:export
    ;; conditions
    #:cl-cmatrix-error
@@ -85,6 +90,9 @@ itself SBCL-only). See docs/src/reference/compatibility.md for details.")
    #:matrix-resize
    ;; rendering
    #:matrix-cell-style
+   #:render-context
+   #:make-render-context
+   #:render-context-style-cache
    #:matrix-draw
    ;; real-time driver loop
    #:+default-fps+
@@ -93,13 +101,14 @@ itself SBCL-only). See docs/src/reference/compatibility.md for details.")
    #:run-state-matrix
    #:run-state-renderer
    #:run-state-quitp
-   #:run-state-input-stream
+   #:run-state-input-poller
+   #:run-state-render-context
    #:run-state-poll
    #:run-state-advance
    #:run-state-render
-   #:quit-key-character-p
-   #:poll-quit-key
-   #:poll-quit-key-cps
+   #:quit-key-event-p
+   #:poll-quit-events
+   #:poll-quit-events-cps
    #:run-matrix))
 
 (defpackage #:cl-cmatrix/cli

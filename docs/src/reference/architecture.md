@@ -26,17 +26,23 @@ its origin stays visible at every call site's package qualification.
 | `src/registry.lisp` | `define-registry-queries`, shared by the two registries above. |
 | `src/column.lisp` | `column`: one falling character stream's state and fall logic. |
 | `src/state.lisp` | `matrix-state`: the pure, whole-screen struct `t/` tests directly. |
+| `src/render-context.lisp` | `render-context`: renderer-local style-cache ownership. |
 | `src/render.lisp` | `matrix-draw`/`matrix-cell-style`, mapping `matrix-state` onto a `cl-tty-kit` screen. |
-| `src/loop.lisp` | `run-state`, the real-time driver loop, and `run-matrix` itself. |
+| `src/input.lisp` | Typed quit-event predicates and direct/CPS event dispatch. |
+| `src/run-state.lisp` | `run-state`: renderer, typed input poller, resize polling, and tick adapters. |
+| `src/runtime.lisp` | The real-time driver loop and `run-matrix` itself. |
 | `src/cli.lisp` | `cl-cmatrix/cli`: flag parsing, `main`, `image-entry-point`. |
 
 ## Why `matrix-state` and `run-state` are separate structs
 
 `matrix-state` (`src/state.lisp`) holds only what `matrix-advance` needs:
 columns, dimensions, speed, color, glyphs, and an injected `random-state`.
-Nothing in it touches a terminal. `run-state` (`src/loop.lisp`) wraps a
-`matrix-state` together with a `cl-tty-kit` renderer, the input stream, and
-a quit flag -- the I/O half `run-matrix`'s tick loop needs.
+Nothing in it touches a terminal or owns renderer caches. `run-state`
+(`src/run-state.lisp`) wraps a `matrix-state` together with a `cl-tty-kit`
+renderer, a typed input poller, a render context, and a quit flag -- the I/O
+half `run-matrix`'s tick loop needs. `src/runtime.lisp` owns terminal-session
+setup and the realtime tick-loop composition, while `src/input.lisp` owns the
+quit policy.
 
 Keeping them separate is what lets `t/`'s deterministic tests call
 `matrix-advance` directly, seed a `random-state`, and assert on exact

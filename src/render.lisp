@@ -36,8 +36,8 @@ when true, renders that trail row bold too, not only the head."
 (defun %matrix-style-vector (color trail-length bold cache)
   "Return the memoized vector of TRAIL-LENGTH styles a column of that length
 draws with under COLOR and BOLD, computing it via MATRIX-CELL-STYLE on the
-first request. CACHE is a MATRIX-STATE's own STYLE-CACHE slot, so entries
-persist for that state's whole lifetime rather than only the current frame;
+first request. CACHE is a RENDER-CONTEXT's STYLE-CACHE slot, so entries
+persist for that renderer's whole lifetime rather than only the current frame;
 BOLD is part of the key (color -> trail-length -> bold -> styles) precisely
 because of that -- with a per-frame cache it was frame-invariant and could be
 left out, but a cache that outlives the frame must key on everything
@@ -80,18 +80,20 @@ Callers are expected to pass a non-NIL RAINBOW-SCHEMES only when COLOR is
       (nth (mod x (length rainbow-schemes)) rainbow-schemes)
       color))
 
-(defun matrix-draw (screen state)
+(defun matrix-draw (screen state context)
   "Draw every column of STATE's current frame onto SCREEN, a CL-TTY-KIT
 SCREEN at least STATE's WIDTH by HEIGHT. Cells outside every column's
 currently lit trail are left untouched, so callers that want a clean frame
 each tick should SCREEN-CLEAR (or CL-TTY-KIT:RENDERER-CLEAR) first. When
 STATE's COLOR is :RAINBOW, each column is resolved to a different real
-scheme by column index rather than all sharing one. Returns SCREEN."
+scheme by column index rather than all sharing one. CONTEXT owns the
+renderer-local style cache. Returns SCREEN."
+  (check-type context render-context)
   (let* ((height (matrix-state-height state))
          (color (matrix-state-color state))
          (bold (matrix-state-bold state))
          (rainbow-schemes (when (eq color :rainbow) (list-color-schemes)))
-         (style-cache (matrix-state-style-cache state)))
+         (style-cache (render-context-style-cache context)))
     (with-screen-batch (screen)
       (loop for x fixnum below (matrix-state-width state)
             for column = (svref (matrix-state-columns state) x)

@@ -1,7 +1,7 @@
 ;;;; t/resize-test.lisp
 ;;;;
 ;;;; MATRIX-RESIZE is what a real run calls mid-loop when the polled
-;;;; terminal size changes (see loop.lisp's %POLL-RESIZE); these tests drive
+;;;; terminal size changes (see run-state.lisp's %POLL-RESIZE); these tests drive
 ;;;; it directly against a MATRIX-STATE that has already advanced a few
 ;;;; ticks, which is what "mid-run" means for a pure function.
 

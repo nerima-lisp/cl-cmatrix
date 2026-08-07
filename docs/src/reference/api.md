@@ -15,9 +15,11 @@ front end lives in the separate `cl-cmatrix/cli` package (`make-cmatrix-app`,
                  (fps 30) (random-state (make-random-state t)))
 ```
 
-Run the full-screen animation on `stream` until a quit key (`q`, `Q`,
-`Escape`, or Ctrl-C) is read from `input-stream`. Enters raw mode and the
-terminal's alternate screen for the duration and always restores both.
+Run the full-screen animation on `stream` until a typed quit event (`q`, `Q`,
+`Escape`, or Ctrl-C) is observed from `input-stream`. The stream is adapted
+once to CL-TTY-KIT's input poller; callers do not need to parse raw
+characters. Enters raw mode and the terminal's alternate screen for the
+duration and always restores both.
 `speed`, `color`, `glyphs`, and `bold` are as in
 [`make-matrix-state`](#make-matrix-state). `fps` is the target tick rate
 (default 30, see [`+default-fps+`](#default-fps)). `random-state` seeds the
@@ -39,16 +41,17 @@ instead of calling `run-matrix`.
 ### `run-state`
 
 ```lisp
-(make-run-state &key matrix renderer quitp input-stream)
+(make-run-state &key matrix renderer quitp input-poller render-context)
 ```
 
 The mutable driver state threaded through
 `cl-tty-kit:tick-loop-run-realtime`. Readers: `run-state-matrix` (the
 [`matrix-state`](#matrix-state) proper), `run-state-renderer` (the
 double-buffered `cl-tty-kit` repaint helper), `run-state-quitp` (set once a
-quit key has been seen), `run-state-input-stream` (where `poll-quit-key`
-looks for one). Kept separate from `matrix-state` so that struct stays free
-of I/O and can go on being used by the pure, deterministic tests in `t/`.
+quit event has been seen), `run-state-input-poller` (a callable that returns
+typed `cl-tty-kit:key-event` values), and `run-state-render-context` (the
+renderer-local style cache). Kept separate from `matrix-state` so that the
+animation state stays free of I/O and rendering caches.
 
 ### `run-state-poll`
 
@@ -58,11 +61,10 @@ of I/O and can go on being used by the pure, deterministic tests in `t/`.
 
 Observe the real terminal ahead of `run-state`'s next tick: reflow for the
 current terminal size (via `terminal-size-fn`), resize the renderer to
-match, and record whether a quit key has arrived on `run-state`'s
-`input-stream`. Returns `run-state`, mutated in place -- this is the `:poll`
-half of the poll/advance split `cl-tty-kit:tick-loop-run-realtime`'s own
-`:poll` argument drives (added in `cl-tty-kit` v1.4.0), run once before
-every tick's `run-state-advance`.
+match, poll the injected input-poller, and record whether a quit event has
+arrived. Returns `run-state`, mutated in place -- this is the `:poll` half of
+the poll/advance split `cl-tty-kit:tick-loop-run-realtime` drives, run once
+before every tick's `run-state-advance`.
 
 ### `run-state-advance`
 
@@ -72,10 +74,9 @@ every tick's `run-state-advance`.
 
 Advance `run-state`'s underlying `matrix-state` by one tick via
 [`matrix-advance`](#matrix-advance). Returns `run-state`, mutated in place --
-the pure-given-`random-state` half of the poll/advance split; terminal
-observation is `run-state-poll`'s job instead. Never used by the
-deterministic bounded-tick tests, which only exercise `matrix-advance`
-directly.
+the animation-only half of the poll/advance split; terminal observation is
+`run-state-poll`'s job instead. `matrix-advance` copies the random state
+before consuming it, so caller-owned state is not mutated.
 
 ### `run-state-render`
 
@@ -86,36 +87,28 @@ directly.
 Redraw `run-state`'s renderer back buffer from its current `matrix-state`
 and return the diffed ANSI frame string for this tick.
 
-### `quit-key-character-p` / `poll-quit-key` / `poll-quit-key-cps`
+### `quit-key-event-p` / `poll-quit-events` / `poll-quit-events-cps`
 
 ```lisp
-(quit-key-character-p character)
-(poll-quit-key stream)
-(poll-quit-key-cps stream on-quit on-continue)
+(quit-key-event-p event)
+(poll-quit-events events)
+(poll-quit-events-cps events on-quit on-continue)
 ```
 
-`quit-key-character-p` is true when `character` should stop the animation:
-`q`, `Q`, or `Escape`, or the raw Ctrl-C byte (character code 3).
-`poll-quit-key` consumes every character currently available on `stream`
-without blocking, returning true as soon as one of them satisfies
-`quit-key-character-p` (the rest, if any, are still consumed, since none of
-them will be looked at again). Used instead of a blocking read because a
-real-time animation loop cannot afford to wait on a key that may never
-come; works against any character stream -- including a
-`string-input-stream` in a test -- not only a live terminal.
+`quit-key-event-p` is true for a pressed CL-TTY-KIT `key-event` carrying
+`q`, `Q`, Ctrl-C, or the special `:escape` code. `poll-quit-events` searches
+a sequence of typed events and returns true when one is a quit event.
 
-`poll-quit-key-cps` is `poll-quit-key`'s own implementation, in
-continuation-passing style: it calls `on-quit` with the offending character
-the moment one is found, or `on-continue` with no arguments once `stream` is
-exhausted without one. `poll-quit-key` is a thin direct-style wrapper over
-it. Use `poll-quit-key-cps` directly when a caller wants the actual quit
-character rather than only a boolean -- for example to log which of
-q/Q/Escape/Ctrl-C ended a run.
+`poll-quit-events-cps` is the continuation-passing implementation: it calls
+`on-quit` with the offending event, or `on-continue` with no arguments when
+the sequence contains no quit event. The direct wrapper is useful for the
+usual boolean policy; the CPS form lets a caller log or dispatch the exact
+event without rebuilding the scan.
 
 Together these compose the loop `run-matrix` itself drives: `make-run-state`
-builds the initial state around a `matrix-state` and a renderer, each tick
-calls `run-state-poll` (which polls `poll-quit-key` on the `input-stream`),
-then `run-state-advance`, then `run-state-render`, and the loop stops once
+builds the initial state around a `matrix-state`, renderer, typed input
+poller, and render context. Each tick calls `run-state-poll`, then
+`run-state-advance`, then `run-state-render`, and the loop stops once
 `run-state-quitp` is true.
 
 ## Building and advancing state
@@ -146,8 +139,9 @@ than only the head. Signals [`invalid-dimensions`](#invalid-dimensions),
 ```
 
 Advance every column of `state` by one tick, returning a new `matrix-state`.
-Pure given an already-positioned `random-state`: the same seed and tick
-count always reach the same column state.
+Deterministic for an already-positioned state: the same state and tick count
+always reach the same column state. Each transition consumes a copy of the
+stored random state, leaving the input state's random state untouched.
 
 ### `matrix-resize`
 
@@ -156,8 +150,8 @@ count always reach the same column state.
 ```
 
 Return `state` reflowed to `new-width` by `new-height`. Existing columns are
-kept exactly; a widened matrix spawns fresh columns from `state`'s own
-random state.
+kept exactly; a widened matrix spawns fresh columns from a copy of `state`'s
+own random state.
 
 ### `matrix-state`
 
@@ -288,14 +282,28 @@ Return the glyph `simple-vector` `name` names (`:ascii` ->
 ### `matrix-draw`
 
 ```lisp
-(matrix-draw screen state)
+(matrix-draw screen state context)
 ```
 
 Draw every column of `state`'s current frame onto a `cl-tty-kit` `screen`.
+`context` is a [`render-context`](#render-context) owning the style cache for
+that renderer. Reuse one context for a renderer instead of putting cache
+data in `matrix-state`.
 When `state`'s `color` is `:rainbow`, each column is resolved to a
 different real scheme by column index (cycling through
 [`list-color-schemes`](#list-color-schemes)) rather than all columns
 sharing one.
+
+### `render-context`
+
+```lisp
+(make-render-context)
+(render-context-style-cache context)
+```
+
+Renderer-local memoization for `matrix-draw`. Keeping the cache here makes
+animation transitions data-only and lets independent renderers maintain
+independent style tables.
 
 ### `matrix-cell-style`
 

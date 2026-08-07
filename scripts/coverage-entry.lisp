@@ -35,7 +35,7 @@
 ;;;;     every DEFPARAMETER holding constructed data (not a bare literal)
 ;;;;     was invisibly capping this number, regardless of how thoroughly the
 ;;;;     functions consuming that data were tested.
-;;;;   - RUN-MATRIX (src/loop.lisp) drives a real terminal via
+;;;;   - RUN-MATRIX (src/runtime.lisp) drives a real terminal via
 ;;;;     CL-TTY-KIT:WITH-TERMINAL-SESSION and cannot be unit-tested in
 ;;;;     process; MAIN and IMAGE-ENTRY-POINT (src/cli.lisp) end in
 ;;;;     HOST-KIT:QUIT, a real process exit that would kill the test runner
@@ -49,7 +49,8 @@
 ;;;; (here, once, from the DEFPARAMETER's own value form -- see
 ;;;; +COLOR-SCHEMES+/%BUILD-COLOR-SCHEMES in src/color-scheme.lisp,
 ;;;; +DEFAULT-GLYPHS+/%BUILD-DEFAULT-GLYPHS in src/glyphs.lisp,
-;;;; +QUIT-CHARACTERS+/%BUILD-QUIT-CHARACTERS in src/loop.lisp). Bare-literal
+;;;; Typed quit-event dispatch now lives in src/input.lisp; it is not a
+;;;; constructed top-level data form. Bare-literal
 ;;;; DEFPARAMETERs (+DEFAULT-FPS+, +MIN/MAX-TRAIL-LENGTH+,
 ;;;; +MAX-RAW-INTERVAL+) were deliberately left alone: wrapping a single
 ;;;; integer constant in a function to chase a coverage tool's attribution

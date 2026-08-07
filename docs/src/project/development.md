@@ -102,10 +102,13 @@ src/
 ├── registry.lisp         shared list-*/​*-p registry-query macro
 ├── column.lisp           one falling character stream
 ├── state.lisp            matrix-state, the pure whole-screen struct
+├── render-context.lisp   render-owned style memoization
 ├── render.lisp           matrix-state -> cl-tty-kit screen
-├── loop.lisp             run-state, the real-time driver loop, run-matrix
+├── input.lisp            typed key-event quit dispatch and CPS helpers
+├── run-state.lisp        mutable realtime driver state and tick helpers
+├── runtime.lisp          terminal session, tick loop, and run-matrix
 └── cli.lisp              cl-cmatrix/cli: flags, main, image-entry-point
-t/                        one test file per src/ file above
+t/                        one test file per source concern above
 docs/                     this site (mkdocs.yml + src/)
 ```
 

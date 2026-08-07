@@ -13,11 +13,8 @@
   "The full state of a matrix-rain animation at one tick. COLUMNS is a
 SIMPLE-VECTOR of WIDTH COLUMN structures, one per screen column. BOLD, when
 true, renders every lit row bold rather than only the head (see
-MATRIX-CELL-STYLE). STYLE-CACHE is MATRIX-DRAW's memo of the per-trail-length
-style vectors it draws with; it lives here, rather than being rebuilt per
-frame, because its whole key space (color x trail-length x bold) is fixed for
-a state's lifetime -- MATRIX-ADVANCE and MATRIX-RESIZE both go through
-%COPY-MATRIX-STATE, which carries the same table forward."
+MATRIX-CELL-STYLE). The state contains only animation data; renderer-local
+memoization lives in RENDER-CONTEXT."
   (width 0 :type fixnum)
   (height 0 :type fixnum)
   (columns #() :type simple-vector)
@@ -26,8 +23,7 @@ a state's lifetime -- MATRIX-ADVANCE and MATRIX-RESIZE both go through
   (color :green :type keyword)
   (glyphs +default-glyphs+ :type simple-vector)
   (bold nil :type boolean)
-  (tick 0 :type fixnum)
-  (style-cache (make-hash-table :test #'eq) :type hash-table))
+  (tick 0 :type fixnum))
 
 (defun %assert-dimensions (width height)
   (unless (and (typep width '(integer 1 *)) (typep height '(integer 1 *)))
@@ -41,6 +37,10 @@ a state's lifetime -- MATRIX-ADVANCE and MATRIX-RESIZE both go through
 (defun %default-color () :green)
 (defun %default-bold () nil)
 
+(defun %copy-random-state (random-state)
+  (check-type random-state random-state)
+  (make-random-state random-state))
+
 (defun make-matrix-state (width height &key (speed (%default-speed)) (color (%default-color))
                                              (glyphs +default-glyphs+)
                                              (bold (%default-bold))
@@ -49,6 +49,8 @@ a state's lifetime -- MATRIX-ADVANCE and MATRIX-RESIZE both go through
 spawned from RANDOM-STATE (an actual CL random state object -- inject one
 built by, e.g., SB-EXT:SEED-RANDOM-STATE for a reproducible run; the default
 is a nondeterministic one, matching CL:MAKE-RANDOM-STATE's own T argument).
+The supplied random state is copied, so constructing a state never mutates
+caller-owned randomness.
 
 SPEED is a positive real fall-speed multiplier (default 1; larger values
 fall faster) and COLOR names one of LIST-COLOR-SCHEMES, or :RAINBOW to draw
@@ -63,22 +65,23 @@ when COLOR is neither a registered scheme nor :RAINBOW."
   (%assert-speed speed)
   ;; Signals UNKNOWN-COLOR-SCHEME up front, before spawning columns.
   (unless (color-choice-p color) (error 'unknown-color-scheme :name color))
-  (%make-matrix-state
-    :width width :height height :random-state random-state :speed speed
-    :color color :glyphs glyphs :bold bold :tick 0
-    :columns (coerce (loop repeat width
-                            collect (%spawn-column glyphs random-state speed))
-                      'simple-vector)))
+  (let ((random-state (%copy-random-state random-state)))
+    (%make-matrix-state
+      :width width :height height :random-state random-state :speed speed
+      :color color :glyphs glyphs :bold bold :tick 0
+      :columns (coerce (loop repeat width
+                              collect (%spawn-column glyphs random-state speed))
+                        'simple-vector))))
 
 (defun matrix-advance (state)
   "Advance every column of STATE by one tick, returning a new MATRIX-STATE.
 Pure given an already-positioned RANDOM-STATE: calling this TICKS times
 against a MATRIX-STATE built with a fixed seed produces byte-identical
 output on every run, which is what the deterministic tests in t/ pin down.
-Does not mutate STATE's COLUMNS vector; STATE's RANDOM-STATE object is
-mutated in place by the random draws, as every CL random-state normally is."
+Does not mutate STATE or its RANDOM-STATE object; the returned state owns the
+advanced copy of the random state."
   (let* ((glyphs (matrix-state-glyphs state))
-         (random-state (matrix-state-random-state state))
+         (random-state (%copy-random-state (matrix-state-random-state state)))
          (speed (matrix-state-speed state))
          (height (matrix-state-height state))
          (old-columns (matrix-state-columns state))
@@ -89,13 +92,14 @@ mutated in place by the random draws, as every CL random-state normally is."
                              glyphs random-state speed height)))
     (let ((new-state (%copy-matrix-state state)))
       (setf (matrix-state-columns new-state) new-columns
+            (matrix-state-random-state new-state) random-state
             (matrix-state-tick new-state) (1+ (matrix-state-tick state)))
       new-state)))
 
 (defun matrix-resize (state new-width new-height)
   "Return a new MATRIX-STATE reflowed to NEW-WIDTH by NEW-HEIGHT. Columns
 [0, MIN(NEW-WIDTH, old width)) are kept exactly as they were; a widened
-matrix spawns fresh columns -- drawn from STATE's own RANDOM-STATE, so a
+matrix spawns fresh columns -- drawn from a copy of STATE's RANDOM-STATE, so a
 resize mid-run is exactly as reproducible as everything else -- for the
 newly exposed ones, and a narrowed matrix simply drops the rightmost
 columns. A height change touches no column: MATRIX-DRAW already clips rows
@@ -109,7 +113,7 @@ integer."
   (let* ((old-columns (matrix-state-columns state))
          (old-width (length old-columns))
          (glyphs (matrix-state-glyphs state))
-         (random-state (matrix-state-random-state state))
+         (random-state (%copy-random-state (matrix-state-random-state state)))
          (speed (matrix-state-speed state))
          (new-columns
            (cond
@@ -122,5 +126,6 @@ integer."
          (new-state (%copy-matrix-state state)))
     (setf (matrix-state-width new-state) new-width
           (matrix-state-height new-state) new-height
-          (matrix-state-columns new-state) new-columns)
+          (matrix-state-columns new-state) new-columns
+          (matrix-state-random-state new-state) random-state)
     new-state))

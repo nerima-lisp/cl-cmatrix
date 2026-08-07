@@ -33,7 +33,7 @@ same X/ROW -- the two frames differ only in the style at that cell."
                                         :random-state (sb-ext:seed-random-state 30))))
     (dotimes (i 30) (setf state (matrix-advance state)))
     (let ((screen (make-screen 3 24)))
-      (matrix-draw screen state)
+      (matrix-draw screen state (make-render-context))
       (multiple-value-bind (x row) (%non-head-lit-cell state)
         (values screen x row)))))
 
@@ -94,7 +94,7 @@ same X/ROW -- the two frames differ only in the style at that cell."
       (dotimes (i 30) (setf state (matrix-advance state)))
       (let ((screen (make-screen 3 24))
             (column (aref (matrix-state-columns state) 0)))
-        (matrix-draw screen state)
+        (matrix-draw screen state (make-render-context))
         (with-soft-assertions
           (loop for row below 24
                 do (if (column-row-lit-p column row)
@@ -112,7 +112,7 @@ same X/ROW -- the two frames differ only in the style at that cell."
            (checked 0))
       (dotimes (i 40) (setf state (matrix-advance state)))
       (let ((screen (make-screen width 24)))
-        (matrix-draw screen state)
+        (matrix-draw screen state (make-render-context))
         (with-soft-assertions
           (loop for x below width
                 for column = (aref (matrix-state-columns state) x)

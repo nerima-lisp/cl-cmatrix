@@ -25,7 +25,7 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
   :license "MIT"
   ;; Single source of truth for the version. flake.nix reads this form, and
   ;; release.yml refuses to publish a tag that disagrees with it.
-  :version "0.2.0"
+  :version "0.3.0"
   :homepage "https://github.com/nerima-lisp/cl-cmatrix"
   :bug-tracker "https://github.com/nerima-lisp/cl-cmatrix/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-cmatrix.git")
@@ -37,9 +37,10 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
   :build-pathname "cl-cmatrix"
   :entry-point "cl-cmatrix/cli::image-entry-point"
   ;; cl-tty-kit supplies raw mode, the alternate screen, 256-color styling,
-  ;; the double-buffered renderer, and the real-time tick loop; cl-cli
-  ;; supplies the argument parser and --help/--version scaffolding. Both are
-  ;; dependency-free L1 utilities within this org.
+  ;; typed key events, the double-buffered renderer, and the real-time tick
+  ;; loop; cl-cli supplies the argument parser and --help/--version
+  ;; scaffolding. flake.nix supplies their complete, versioned ASDF closures
+  ;; directly instead of relying on a global registry.
   ;;
   ;; cl-host-kit supplies QUIT, GETCWD and TRUENAMIZE. This system does have
   ;; a "filesystem paths" problem after all: IMAGE-ENTRY-POINT (src/cli.lisp)
@@ -99,8 +100,11 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
    (:file "color-scheme")
    (:file "column")
    (:file "state")
+   (:file "render-context")
    (:file "render")
-   (:file "loop")
+   (:file "input")
+   (:file "run-state")
+   (:file "runtime")
    (:file "cli"))
   ;; Mandatory. Without it `asdf:test-system "cl-cmatrix"` succeeds while
   ;; running zero tests.
@@ -113,7 +117,7 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "0.2.0"
+  :version "0.3.0"
   :homepage "https://github.com/nerima-lisp/cl-cmatrix"
   :bug-tracker "https://github.com/nerima-lisp/cl-cmatrix/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-cmatrix.git")
@@ -131,7 +135,9 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
    (:file "advance-test")
    (:file "resize-test")
    (:file "render-test")
-   (:file "loop-test")
+   (:file "input-test")
+   (:file "run-state-test")
+   (:file "state-machine-test")
    (:file "cli-test")
    (:file "mutation-test"))
   :perform (test-op (operation component)
