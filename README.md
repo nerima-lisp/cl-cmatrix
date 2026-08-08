@@ -97,6 +97,12 @@ loop over `expect`, so each input gets its own named pass/fail instead of one
 aggregate result; shared setup uses `before-each` fixtures over a dynamic
 variable rather than copy-pasted `let` bindings.
 
+`t/pty-e2e.exp` sits alongside them but is not part of that suite. It drives
+the built binary through a real pseudo-terminal to check alternate-screen and
+terminal-state restoration, which an in-process test cannot observe, so it
+needs `expect` and a prior `nix build` and stays a manual gate rather than
+part of `nix flake check`.
+
 ## Contributing
 
 See the org-wide [CONTRIBUTING](https://github.com/nerima-lisp/.github/blob/main/CONTRIBUTING.md)

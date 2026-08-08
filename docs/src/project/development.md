@@ -70,6 +70,41 @@ body is read live from `src/column.lisp` on every run, never copied into the
 test file, so there is nothing here to fall out of sync with the real
 implementation.
 
+### Pseudo-terminal end-to-end check
+
+`t/pty-e2e.exp` drives the delivered binary through a real pseudo-terminal.
+The in-process `cl-weave` suite structurally cannot cover this: `run-matrix`
+is never called there, and what matters here -- entering the alternate screen,
+hiding the cursor, restoring both on the way out, and handing the terminal
+back in the `termios` state it was borrowed in -- only happens once a raw-mode
+full-screen program is attached to something that can actually be put into raw
+mode. A pipe cannot.
+
+The script spawns `cl-cmatrix --fps 1 --seed 1` twice on an 80x24 pty under
+`TERM=xterm-256color` and asserts the exact control sequences in order:
+alternate-screen entry, then cursor hide, then -- after `q` in the first case
+and `SIGINT` in the second -- cursor restore, then alternate-screen exit. Both
+cases require the process to exit 0 on its own rather than die from the
+signal, which is why the second spawn `exec`s the binary: `SIGINT` has to
+reach it and not the wrapping shell. The first case additionally compares
+`stty -g` from before and after the run, masking off `PENDIN` (kernel state
+set while canonical input is being restored, not a setting the program owns),
+so a run that leaves the terminal in raw mode fails instead of merely looking
+wrong afterwards. On any failure the captured pty transcript is written to
+stderr.
+
+It needs `expect` and `perl` on `PATH`, `TMPDIR` set, and an already-built
+binary:
+
+```sh
+nix build
+expect t/pty-e2e.exp ./result/bin/cl-cmatrix
+```
+
+No `flake.nix` output refers to this script, so `nix flake check` does not run
+it and neither does CI. It is a manual gate: run it by hand whenever raw-mode
+entry, terminal restoration, or quit and signal handling changes.
+
 ### Informational benchmarks
 
 The benchmark suite measures matrix advancement and rendering without making
@@ -92,9 +127,19 @@ nix develop --command sh -c \
 Use comma-separated values in `BENCHMARK_SIZES` to measure multiple matrix
 sizes. `BENCHMARK_PROCESSES`, `BENCHMARK_TICKS`, `BENCHMARK_WARMUP`, and
 `BENCHMARK_SAMPLES` control process count and sampling volume; the suite also
-accepts `BENCHMARK_TIMEOUT_SECONDS` for the per-process timeout. The underlying
-runner reports matrix advance, dirty rendering, and ANSI encoding workloads;
-the suite records the matrix-advance and dirty-render rows in its TSV output.
+accepts `BENCHMARK_TIMEOUT_SECONDS` for the per-process timeout.
+
+`scripts/benchmark.lisp` is the measurement itself: one SBCL process, one
+matrix size, a fixed seed, and three workloads -- matrix advance, advance plus
+dirty render, and advance plus dirty render plus ANSI encode -- each reported
+as per-sample, median, min/max and spread figures in ns/tick and
+bytes-consed/tick. It applies no threshold and can be run on its own
+(`sbcl --script scripts/benchmark.lisp --help` lists its options).
+`scripts/benchmark-suite.sh` measures nothing of its own: it runs that runner
+once per size and process index under the timeout, parses the matrix-advance
+and dirty-render medians back out of each log into the TSV, and fails if a
+size did not produce the expected number of rows. The ANSI-encode workload is
+reported by the runner but not carried into the TSV.
 
 ### Coverage
 
@@ -139,7 +184,11 @@ src/
 ├── runtime.lisp          terminal session, tick loop, and run-matrix
 ├── cli-options.lisp      declarative command-line option metadata
 └── cli.lisp              cl-cmatrix/cli: flags, main, image-entry-point
-t/                        one test file per source concern above
+t/                        one test file per source concern above, plus pty-e2e.exp
+scripts/
+├── benchmark-suite.sh    repeats the runner, reduces logs to TSV
+├── benchmark.lisp        the single-process benchmark runner
+└── coverage-entry.lisp   coverage entry point and floor gate
 docs/                     this site (mkdocs.yml + src/)
 ```
 
