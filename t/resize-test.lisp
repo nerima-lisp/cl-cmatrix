@@ -4,56 +4,178 @@
 ;;;; terminal size changes (see run-state.lisp's %POLL-RESIZE); these tests drive
 ;;;; it directly against a MATRIX-STATE that has already advanced a few
 ;;;; ticks, which is what "mid-run" means for a pure function.
+;;;;
+;;;; Two upstream-conformance facts shape every expectation below. A state
+;;;; holds (MATRIX-STATE-COLUMN-COUNT WIDTH) = (CEILING WIDTH 2) columns and
+;;;; not WIDTH, because upstream animates only every other screen column. And
+;;;; a column's buffer is HEIGHT+1 cells and not HEIGHT, because internal row
+;;;; 0 is the off-screen staging row the spawn test reads (see column.lisp).
 
 (in-package #:cl-cmatrix/test)
 
+(defun %resized-fixture (width height seed &key old-style-p (ticks 20))
+  "A MATRIX-STATE advanced TICKS frames, so its columns hold real characters
+instead of the all-:EMPTY buffers a freshly spawned state has. Every
+\"resize keeps what was on screen\" assertion below would pass vacuously
+against a blank fixture, so the tests that rely on this also assert that it
+really is populated. ASYNCP is off so every column advances every frame."
+  (let ((state (make-matrix-state width height
+                                  :asyncp nil
+                                  :old-style-p old-style-p
+                                  :random-state (sb-ext:seed-random-state seed))))
+    (loop repeat ticks do (setf state (matrix-advance state)))
+    state))
+
+(defun %column-has-characters-p (column)
+  "True when COLUMN currently shows at least one glyph."
+  (some #'characterp (column-cells column)))
+
 (describe "matrix-resize"
   (it "keeps existing columns exactly, growing width by appending fresh ones"
-    (let* ((state (make-matrix-state 4 10 :random-state (sb-ext:seed-random-state 11)))
-           (advanced (matrix-advance (matrix-advance state)))
-           (before-columns (matrix-state-columns advanced))
-           (resized (matrix-resize advanced 7 10)))
+    (let* ((advanced (%resized-fixture 4 10 11))
+           (before (matrix-state-columns advanced))
+           (resized (matrix-resize advanced 7 10))
+           (after (matrix-state-columns resized)))
       (with-soft-assertions
         (expect (= (matrix-state-width resized) 7) :to-be-truthy)
-        (expect (= (length (matrix-state-columns resized)) 7) :to-be-truthy)
-        (expect (equalp (subseq (matrix-state-columns resized) 0 4) before-columns)
-                :to-be-truthy))))
+        (expect (= (length after) (matrix-state-column-count 7)) :to-be-truthy)
+        ;; Non-vacuity: the prefix check below says nothing unless columns
+        ;; were actually appended.
+        (expect (> (length after) (length before)) :to-be-truthy)
+        (expect (equalp (subseq after 0 (length before)) before) :to-be-truthy))))
 
   (it "shrinking width keeps the leftmost columns and drops the rest"
-    (let* ((state (make-matrix-state 6 10 :random-state (sb-ext:seed-random-state 12)))
-           (before (subseq (matrix-state-columns state) 0 3))
+    (let* ((state (%resized-fixture 6 10 12))
+           (kept (matrix-state-column-count 3))
+           (before (subseq (matrix-state-columns state) 0 kept))
            (resized (matrix-resize state 3 10)))
       (with-soft-assertions
         (expect (= (matrix-state-width resized) 3) :to-be-truthy)
+        ;; Non-vacuity: columns must really have been dropped.
+        (expect (< kept (length (matrix-state-columns state))) :to-be-truthy)
         (expect (equalp (matrix-state-columns resized) before) :to-be-truthy))))
 
-  (it "changing only the height leaves every column's fields untouched"
-    (let* ((state (make-matrix-state 5 10 :random-state (sb-ext:seed-random-state 13)))
+  (it "growing the height keeps every visible row and pads the new rows with :EMPTY"
+    (let* ((state (%resized-fixture 5 10 13))
            (before (matrix-state-columns state))
-           (resized (matrix-resize state 5 20)))
+           (resized (matrix-resize state 5 20))
+           (after (matrix-state-columns resized)))
       (with-soft-assertions
         (expect (= (matrix-state-height resized) 20) :to-be-truthy)
-        (expect (equalp (matrix-state-columns resized) before) :to-be-truthy))))
+        (expect (= (length after) (length before)) :to-be-truthy)
+        (expect (every (lambda (column)
+                         (and (= (length (column-cells column)) 21)
+                              (= (length (column-heads column)) 21)))
+                       after)
+                :to-be-truthy)
+        ;; Non-vacuity: the preservation check would hold trivially over an
+        ;; all-:EMPTY fixture, so pin that there is something on screen.
+        (expect (some #'%column-has-characters-p before) :to-be-truthy)
+        (expect (every (lambda (old new)
+                         (dotimes (row 11 t)
+                           (unless (and (eql (column-cell-at old row)
+                                             (column-cell-at new row))
+                                        (eq (column-head-p old row)
+                                            (column-head-p new row)))
+                             (return nil))))
+                       before after)
+                :to-be-truthy)
+        ;; Newly exposed rows must be :EMPTY and never :SPACE: :SPACE at
+        ;; internal row 1 is upstream's spawn sentinel, so padding with it
+        ;; would arm a stream merely because the terminal got taller.
+        (expect (every (lambda (column)
+                         (loop for row from 11 to 20
+                               always (and (eq (column-cell-at column row) :empty)
+                                           (not (column-head-p column row)))))
+                       after)
+                :to-be-truthy))))
 
-  (it "resizes fixed-height old-style buffers with their mode intact"
-    (let* ((state (make-matrix-state 5 10 :old-style-p t
-                                     :random-state (sb-ext:seed-random-state 63)))
+  (it "shrinking the height truncates the buffer and clamps LENGTH and SPACES onto it"
+    (let* ((state (%resized-fixture 5 20 14))
+           (before (matrix-state-columns state))
+           (resized (matrix-resize state 5 4))
+           (after (matrix-state-columns resized)))
+      (with-soft-assertions
+        (expect (= (matrix-state-height resized) 4) :to-be-truthy)
+        (expect (every (lambda (column)
+                         (and (= (length (column-cells column)) 5)
+                              (= (length (column-heads column)) 5)))
+                       after)
+                :to-be-truthy)
+        (expect (every (lambda (old new)
+                         (loop for row from 0 to 4
+                               always (eql (column-cell-at old row)
+                                           (column-cell-at new row))))
+                       before after)
+                :to-be-truthy)
+        ;; Non-vacuity: the clamp only means anything if some column really
+        ;; was carrying a stream longer than the new screen.
+        (expect (some (lambda (column) (> (column-length column) 4)) before)
+                :to-be-truthy)
+        ;; A stream longer than the screen would never finish growing, and a
+        ;; SPACES countdown longer than the screen would stall the respawn.
+        (expect (every (lambda (column)
+                         (and (<= +min-trail-length+ (column-length column) 4)
+                              (<= 0 (column-spaces column) 4)))
+                       after)
+                :to-be-truthy))))
+
+  (it "clamps LENGTH no lower than +MIN-TRAIL-LENGTH+ on a screen shorter than that"
+    (let* ((state (%resized-fixture 5 20 15))
+           (resized (matrix-resize state 5 2)))
+      (with-soft-assertions
+        (expect (= (matrix-state-height resized) 2) :to-be-truthy)
+        (expect (every (lambda (column) (= (column-length column) +min-trail-length+))
+                       (matrix-state-columns resized))
+                :to-be-truthy))))
+
+  (it "reflows old-style columns into HEIGHT+1 buffers with the mode flag intact"
+    (let* ((state (%resized-fixture 5 10 63 :old-style-p t))
            (resized (matrix-resize state 7 14)))
-      (expect (matrix-state-old-style-p resized) :to-be-truthy)
-      (expect (every (lambda (column)
-                       (and (old-style-column-p column)
-                            (= (length (old-style-column-glyphs column)) 14)
-                            (= (length (old-style-column-glyph-bold-p column)) 14)))
-                     (matrix-state-columns resized))
-              :to-be-truthy)))
+      (with-soft-assertions
+        (expect (matrix-state-old-style-p resized) :to-be-truthy)
+        (expect (= (length (matrix-state-columns resized)) (matrix-state-column-count 7))
+                :to-be-truthy)
+        (expect (every (lambda (column)
+                         (and (column-p column)
+                              (= (length (column-cells column)) 15)
+                              (= (length (column-heads column)) 15)))
+                       (matrix-state-columns resized))
+                :to-be-truthy)
+        ;; Old style is a flag on the shared COLUMN structure now, not a
+        ;; separate type, so the reflowed state must still advance under the
+        ;; old-style scan -- which indexes rows 1..HEIGHT-1 of the new buffer.
+        (expect (every (lambda (column) (= (length (column-cells column)) 15))
+                       (matrix-state-columns (matrix-advance resized)))
+                :to-be-truthy))))
+
+  (it "reflows the running animation instead of re-initialising it, unlike upstream"
+    (let* ((state (%resized-fixture 5 10 16))
+           (resized (matrix-resize state 9 10)))
+      ;; Upstream's resize calls var_init() and blanks the whole matrix; ours
+      ;; deliberately does not (see MATRIX-RESIZE's docstring), so the frame
+      ;; counter, the async phase and the glyphs on screen all survive.
+      (with-soft-assertions
+        (expect (= (matrix-state-tick resized) (matrix-state-tick state)) :to-be-truthy)
+        (expect (= (matrix-state-async-count resized) (matrix-state-async-count state))
+                :to-be-truthy)
+        (expect (some #'%column-has-characters-p (matrix-state-columns state))
+                :to-be-truthy)
+        (expect (some #'%column-has-characters-p (matrix-state-columns resized))
+                :to-be-truthy))))
 
   (it "reflows reproducibly: growing twice from the same seed yields identical new columns"
     (let* ((state-1 (matrix-resize
                       (make-matrix-state 3 10 :random-state (sb-ext:seed-random-state 21)) 6 10))
            (state-2 (matrix-resize
                       (make-matrix-state 3 10 :random-state (sb-ext:seed-random-state 21)) 6 10)))
-      (expect (equalp (matrix-state-columns state-1) (matrix-state-columns state-2))
-              :to-be-truthy)))
+      (with-soft-assertions
+        ;; Non-vacuity: a fresh column must actually have been spawned, or
+        ;; this only compares the columns both states carried over.
+        (expect (> (length (matrix-state-columns state-1)) (matrix-state-column-count 3))
+                :to-be-truthy)
+        (expect (equalp (matrix-state-columns state-1) (matrix-state-columns state-2))
+                :to-be-truthy))))
 
   (it-each ((0 4) (4 -1))
       "signals INVALID-DIMENSIONS for a new width ~A height ~A"
@@ -62,8 +184,8 @@
       (expect (signals invalid-dimensions (matrix-resize state new-width new-height))
               :to-be-truthy)))
 
-  (it-property "always yields a MATRIX-STATE of exactly the requested new dimensions, for any
-valid starting and target size"
+  (it-property "always yields a MATRIX-STATE of exactly the requested new dimensions, with
+HEIGHT+1 cell buffers, for any valid starting and target size"
       ((width (gen-integer :min 1 :max 40))
        (height (gen-integer :min 1 :max 40))
        (new-width (gen-integer :min 1 :max 40))
@@ -72,4 +194,11 @@ valid starting and target size"
            (resized (matrix-resize state new-width new-height)))
       (expect (= (matrix-state-width resized) new-width) :to-be-truthy)
       (expect (= (matrix-state-height resized) new-height) :to-be-truthy)
-      (expect (= (length (matrix-state-columns resized)) new-width) :to-be-truthy))))
+      (expect (= (length (matrix-state-columns resized))
+                 (matrix-state-column-count new-width))
+              :to-be-truthy)
+      (expect (every (lambda (column)
+                       (and (= (length (column-cells column)) (1+ new-height))
+                            (= (length (column-heads column)) (1+ new-height))))
+                     (matrix-state-columns resized))
+              :to-be-truthy))))

@@ -13,19 +13,24 @@
   ;; :source-control are what let a consumer find the project from a
   ;; Quicklisp or ASDF listing alone.
   :description "A Matrix-style digital rain terminal screensaver for SBCL."
-  :long-description "Full-screen falling-character animation: one independently falling stream per
-terminal column, each with a bright head and a color-graded 256-color dimming trail. Eleven color
-schemes plus rainbow (a different scheme per column), three glyph sets (ASCII, half-width
-katakana, binary), and an optional bold trail. Reflows on terminal resize (polled, not a SIGWINCH
-handler) and quits cleanly on q/Escape/Ctrl-C, always restoring the terminal's prior state. Fall
-speed, glyph choice, and reset timing all route through an injectable random state, so a run
-started from a fixed seed (or --seed on the command line) is exactly reproducible."
+  :long-description "Full-screen falling-character animation modelled on upstream cmatrix 2.0:
+streams fall down every other terminal column, as upstream's own `j += 2` scan does, and a column
+holds cells that each frame's scan rewrites in place rather than a head with a trail behind it.
+Twelve color schemes plus rainbow (a different scheme per column) and four glyph sets -- upstream's
+default printable ASCII, the CJK Symbols and Punctuation block its -c selects, plus half-width
+katakana and binary as extensions of ours. Partial, full and disabled bold modes, upstream's
+old-style scrolling, and the lambda render mode are all present. The color-graded 256-color dimming
+trail is the one deliberate departure from upstream, which colors a whole stream flat. Reflows on
+terminal resize (polled, not a SIGWINCH handler) and quits cleanly on q/Escape/Ctrl-C, always
+restoring the terminal's prior state. Fall timing, glyph choice and stream spawning all route
+through an injectable random state, so a run started from a fixed seed (or --seed on the command
+line) is exactly reproducible."
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
   ;; Single source of truth for the version. flake.nix reads this form, and
   ;; release.yml refuses to publish a tag that disagrees with it.
-  :version "0.3.0"
+  :version "1.0.0"
   :homepage "https://github.com/nerima-lisp/cl-cmatrix"
   :bug-tracker "https://github.com/nerima-lisp/cl-cmatrix/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-cmatrix.git")
@@ -121,7 +126,7 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
   :author "takeokunn <bararararatty@gmail.com>"
   :maintainer "takeokunn <bararararatty@gmail.com>"
   :license "MIT"
-  :version "0.3.0"
+  :version "1.0.0"
   :homepage "https://github.com/nerima-lisp/cl-cmatrix"
   :bug-tracker "https://github.com/nerima-lisp/cl-cmatrix/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-cmatrix.git")
@@ -145,7 +150,13 @@ started from a fixed seed (or --seed on the command line) is exactly reproducibl
    (:file "runtime-test")
    (:file "state-machine-test")
    (:file "cli-test")
-   (:file "mutation-test"))
+   (:file "mutation-test")
+   ;; Reads docs/src/ at run time and checks that what the documentation names
+   ;; still exists, so a rename cannot leave the published reference describing
+   ;; symbols the system no longer exports. It needs docs/ inside the build
+   ;; sandbox, which `sourceInclude` in flake.nix supplies -- the Lisp
+   ;; derivation's source is an allowlist and does not carry docs/ by default.
+   (:file "docs-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (funcall (symbol-function (find-symbol "RUN-TESTS" "CL-CMATRIX/TEST")))

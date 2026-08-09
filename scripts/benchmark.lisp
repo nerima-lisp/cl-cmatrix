@@ -111,16 +111,16 @@ Options:~%\
                  (options-width options)
                  (options-height options)))
               (run-state
-                (cl-cmatrix:make-run-state
+                (cl-cmatrix::make-run-state
                  :matrix state
                  :renderer renderer)))
          (lambda (ticks)
            (dotimes (index ticks)
              (declare (ignore index))
-             (cl-cmatrix:run-state-advance run-state)
-             (cl-cmatrix:run-state-render run-state))
+             (cl-cmatrix::run-state-advance run-state)
+             (cl-cmatrix::run-state-render run-state))
            (values
-            (cl-cmatrix:run-state-matrix run-state)
+            (cl-cmatrix::run-state-matrix run-state)
             (cl-tty-kit:renderer-screen renderer))))))))
 
 (defun measure-sample (workload options)

@@ -4,15 +4,26 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-MkDocs%20Material-0a7a5a)](https://nerima-lisp.github.io/cl-cmatrix/)
 
-A Matrix-style digital rain terminal screensaver for SBCL: one independently
-falling character stream per terminal column, each with a bright head and a
-256-color dimming trail. Reflows on terminal resize and quits cleanly on
-q/Escape/Ctrl-C, always restoring the terminal's prior state. The default
-glyph set is plain printable ASCII, not a port of the classic `cmatrix`'s
-proprietary katakana bitmap font -- though a Unicode half-width katakana
-glyph set is available via `--charset katakana` for a closer look, alongside
-`--charset binary` and twelve color schemes, plus `rainbow` for a
-different scheme per column.
+A Matrix-style digital rain terminal screensaver for SBCL: independently
+falling character streams with a bright head and a 256-color dimming trail.
+Reflows on terminal resize and quits cleanly on q/Escape/Ctrl-C, always
+restoring the terminal's prior state.
+
+The animation follows upstream `cmatrix` 2.0 rather than reinterpreting it.
+Streams animate every other screen column and leave the odd ones blank, a
+column is a buffer of cells a scan rewrites in place rather than a head
+dragging a trail, the default glyphs are upstream's own `!` through `z`
+(U+0021-U+007A), and `-c` draws the CJK Symbols and Punctuation block
+(U+3000-U+303E) that upstream's `-c` draws.
+
+The color gradient is the deliberate departure, and the one place this
+project does not follow upstream: every trail is a 256-color fade from a
+white head through a named scheme's bright color down to the background,
+with `rainbow` for a different scheme per column. Half-width katakana
+(`--charset katakana`) and a 0/1 set (`--charset binary`) are extensions of
+ours with no upstream equivalent -- katakana looks closer to the film than
+upstream's own `-c`, which is exactly why it is not what `-c` selects here.
+Run `cl-cmatrix --help` for the current color and charset choices.
 
 Full documentation is published at <https://nerima-lisp.github.io/cl-cmatrix/>.
 The source for that site lives in [docs/src/](docs/src/).
@@ -20,10 +31,11 @@ The source for that site lives in [docs/src/](docs/src/).
 ## Quick Start
 
 ```sh
-cl-cmatrix                  # default green rain at normal speed
+cl-cmatrix                      # default green rain at normal speed
 cl-cmatrix --speed 2 -C cyan
-cl-cmatrix -C rainbow -c -b          # rainbow katakana, bold trail
-cl-cmatrix --seed 42                    # reproducible run
+cl-cmatrix -C rainbow -c        # rainbow trails, upstream's classic CJK glyphs
+cl-cmatrix -g katakana -B       # half-width katakana (our extension), bold trail
+cl-cmatrix --seed 42            # reproducible run
 ```
 
 Or as a library:
@@ -34,9 +46,13 @@ Or as a library:
 (cl-cmatrix:run-matrix :speed 1.5 :color :cyan)
 ```
 
-Pass `:workers` to configure the persistent `cl-concurrent-kit` worker pool.
-Wide matrices use it for column updates; narrow matrices remain serial to
-avoid scheduling overhead.
+Pass `:workers` to size the persistent `cl-concurrent-kit` worker pool. It is
+started only for a matrix at least **2048 columns wide**; anything narrower
+advances serially rather than pay for worker threads it cannot amortize. No
+terminal window is that wide, so `--workers` on the command line is for
+benchmarks and synthetic runs -- and there it also needs `-a`, since
+asynchronous timing is off by default on the CLI while `run-matrix`'s
+`:asyncp` defaults to true.
 
 ## Install
 
@@ -54,7 +70,7 @@ As a library, from another flake:
 ```nix
 # flake.nix
 inputs.cl-cmatrix = {
-  url = "github:nerima-lisp/cl-cmatrix/v0.3.0";
+  url = "github:nerima-lisp/cl-cmatrix/v1.0.0";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
@@ -79,7 +95,7 @@ delivered binary, not the ASDF system.
 nix develop          # SBCL with CL_SOURCE_REGISTRY already set
 nix build            # -> ./result/bin/cl-cmatrix
 nix run .#test       # run the test suite
-nix flake check      # tests + formatting + docs, the same gate CI uses
+nix flake check      # tests + coverage + formatting + docs, the CI gate
 nix fmt              # format Nix sources (treefmt)
 ```
 

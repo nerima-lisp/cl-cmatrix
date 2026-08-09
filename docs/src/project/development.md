@@ -14,6 +14,12 @@ nix build .#cl-cmatrix   # the ASDF system as a library, no binary
 nix flake check       # every gate below, the same set CI runs
 ```
 
+Every `nix build` on this page that is not building the binary passes an
+explicit `-o`/`--out-link`. Several outputs here are built from the same
+working tree, and each of them would otherwise claim the default `./result`
+in turn -- so a bare `nix build .#docs` silently replaces the binary symlink
+that the pseudo-terminal check below depends on.
+
 ### Flake outputs
 
 | Output | What it is |
@@ -37,15 +43,27 @@ nix run .#test        # sbcl --script run-tests.lisp, the same runner CI uses
 nix flake check       # tests + coverage + formatting + docs together
 ```
 
-Tests live in `t/`, one file per `src/` file, and run under
-[`cl-weave`](https://github.com/nerima-lisp/cl-weave). Fall timing, glyph
-choice, and column reset are all routed through an injectable
-`random-state`, so the deterministic tests pin exact resulting column state
-from a fixed seed rather than asserting on rendered output. Parametrized
-cases use `cl-weave`'s `it-each` table-test macro instead of a hand-rolled
-loop over `expect`, so each input gets its own named pass/fail; shared setup
-uses `before-each` fixtures over a dynamic variable instead of copy-pasted
-`let` bindings.
+Tests live in `t/` and run under
+[`cl-weave`](https://github.com/nerima-lisp/cl-weave). Most files are named
+for the `src/` file they exercise, but the mapping is by *concern*, not one
+file per source file. Four files are named for a behaviour that spans
+several sources -- `advance-test.lisp` (the determinism guarantee),
+`resize-test.lisp` (reflow), `state-machine-test.lisp` (the invariants every
+reachable state has to satisfy under arbitrary advance/resize sequences), and
+`mutation-test.lisp` -- and two read files off disk rather than calling
+loaded symbols: `mutation-test.lisp` reads `src/`, and `docs-test.lisp` reads
+`docs/src` to check this documentation against the implementation. Adding a
+`src/` file does not oblige you to add a matching `t/` file; leaving its
+behaviour unexercised does.
+
+Stream spawn timing, glyph choice, and each column's async threshold are all
+drawn from an injectable `random-state`, so the deterministic tests pin exact
+resulting column state from a fixed seed rather than asserting on rendered
+output. Parametrized cases use `cl-weave`'s `it-each` table-test macro
+instead of a hand-rolled loop over `expect`, so each input gets its own named
+pass/fail; invariants that should hold across a generated input space use
+`it-property`; shared setup uses `before-each` fixtures over a dynamic
+variable instead of copy-pasted `let` bindings.
 `t/concurrent-test.lisp` additionally checks deterministic executor-backed
 advances for wide matrices and keeps the serial fallback covered.
 
@@ -60,15 +78,28 @@ for why.
 ### Mutation testing
 
 Beyond example-based `describe`/`it`/`expect` tests, `t/mutation-test.lisp`
-uses `cl-weave`'s `run-mutations`/`assert-mutation-score` against
-`column-row-lit-p` (`src/column.lisp`): it mutates that function's body
-(flipping comparison operators) and re-checks each variant against the same
-case battery a unit test would use. `sb-cover` line coverage proves a line
-executed, not that a wrong result there would be caught -- a mutation the
-battery fails to notice ("survived") marks exactly that gap. The function's
-body is read live from `src/column.lisp` on every run, never copied into the
-test file, so there is nothing here to fall out of sync with the real
+uses `cl-weave`'s `run-mutations`/`assert-mutation-score` against three pure
+functions: `%column-advances-p` (`src/state.lisp`), the async gate that
+decides whether a column moves this frame, and `column-head-p` and
+`column-cell-at` (`src/column.lisp`), the two bounds-checked cell accessors.
+It mutates each function's body -- flipping comparison and arithmetic
+operators, boolean literals, and `if` branches -- and re-checks every variant
+against the same case battery a unit test would use. `sb-cover` line coverage
+proves a line executed, not that a wrong result there would be caught; a
+mutation the battery fails to notice ("survived") marks exactly that gap.
+Each body is read live from `src/` on every run, never copied into the test
+file, so there is nothing here to fall out of sync with the real
 implementation.
+
+Two things about that file are load-bearing and easy to undo by accident.
+`cl-weave` scores a function it could not mutate as a perfect 1.0, so the
+helper asserts the mutation list is non-empty before scoring it -- a target
+built from operators outside the mutation tables (`%next-async-count` is
+`1+` over `mod`; `%blank-cell-p` is a pair of `eq` tests) yields zero
+mutations and would otherwise pass while proving nothing. And each case table
+must keep an in-bounds case first: both mutated bounds checks are *looser*
+than the originals, so a mutant that reaches an out-of-range case signals
+instead of failing, which `cl-weave` records as errored rather than killed.
 
 ### Pseudo-terminal end-to-end check
 
@@ -93,17 +124,27 @@ so a run that leaves the terminal in raw mode fails instead of merely looking
 wrong afterwards. On any failure the captured pty transcript is written to
 stderr.
 
-It needs `expect` and `perl` on `PATH`, `TMPDIR` set, and an already-built
-binary:
+CI runs it as the `pty-e2e` job in `.github/workflows/ci.yml`, separately
+from `nix flake check`. It stays out of the flake on purpose: a check inside
+the Nix build sandbox would depend on a pty being available there, and a
+failure for that reason would be indistinguishable from the
+terminal-restoration bug the script exists to catch.
+
+To run it locally you need `expect`, plus `perl` and `stty` on `PATH`, and an
+already-built binary:
 
 ```sh
-nix build
-expect t/pty-e2e.exp ./result/bin/cl-cmatrix
+nix build --out-link pty-binary
+nix shell --inputs-from . nixpkgs#expect --command \
+  expect t/pty-e2e.exp ./pty-binary/bin/cl-cmatrix
 ```
 
-No `flake.nix` output refers to this script, so `nix flake check` does not run
-it and neither does CI. It is a manual gate: run it by hand whenever raw-mode
-entry, terminal restoration, or quit and signal handling changes.
+`--inputs-from .` takes `expect` from this flake's own pinned nixpkgs rather
+than from whatever happens to be installed, which is what makes a local run
+mean the same thing as the CI job. Setting `TMPDIR` is optional hygiene: the
+script allocates its transcripts with `file tempfile` rather than building a
+predictable path, so it works without the variable and does not race a
+world-writable `/tmp`.
 
 ### Informational benchmarks
 
@@ -150,19 +191,37 @@ nix build .#checks.<system>.coverage -o coverage-report
 `$out` is the `sb-cover` HTML report itself, produced by `cl-nix-forge`'s
 `mkCoverageReport`. `scripts/coverage-entry.lisp` runs as its entry point:
 it loads and runs the test suite, then gates on `cl-weave:coverage-statistics`
-against two floors -- 90% branch (cleared: measured 92.59%) and 80%
-expression (measured 86.41%). The two floors differ because the remaining
-expression gap is structural, not a testability shortfall: `sb-cover` never
-credits compile-time-only forms (`in-package`, `defpackage` bodies, a bare
-`defmacro`'s own template) or a `defstruct` slot's `:type` declaration, and
-every `defparameter` whose value was more than a bare literal was already
-rewritten into a called function to get credit where that was possible.
+against `+minimum-expression-percent+` and `+minimum-branch-percent+`, which
+that file defines. The run prints both measurements next to both floors, so
+the current numbers come from the build log rather than from this page.
+
+**Those floors are a ratchet, not headroom.** Read this before reacting to a
+red gate. Until v1.0.0 they were set far below the measurement so that a
+harmless refactor could not trip them by chance; the cost was that they could
+not notice a real regression until several points of coverage had already
+been lost, which is exactly what the upstream-conformance rewrite -- most of
+`src/` replaced at once -- was in a position to do quietly. Since v1.0.0 each
+floor sits roughly one point under the measurement it was set from. The
+accepted consequence is the mirror of the old one: a change that legitimately
+costs more than about a point of coverage now fails the gate and has to be
+looked at.
+
+Two rules follow, and neither is negotiable by argument alone. Raise a floor
+when a new measurement clears it -- these numbers are meant to be edited
+upward, not left alone for years. Never lower one to make a red gate green.
+
+The two floors are not the same number because the remaining expression gap
+is structural rather than a testability shortfall. `sb-cover` never credits
+compile-time-only forms -- an `in-package` form, a `defpackage` body, a bare
+`defmacro`'s own template, a `defstruct` slot's `:type` declaration -- and
+every `defparameter` whose value was more than a bare literal has already
+been rewritten into a called function to get credit where that was possible.
 `run-matrix`'s and `main`'s true I/O bodies are covered for real, but only
-via the out-of-process `it-isolated` tests above -- invisible to this
-process's own coverage data by `sb-cover`'s per-process design, not a gap in
-testing. `scripts/coverage-entry.lisp`'s own header comment has the full,
-line-by-line accounting if you want to re-derive the number yourself; read it
-before proposing to raise either floor.
+via the out-of-process `it-isolated` tests above, and are invisible to this
+process's coverage data by `sb-cover`'s per-process design.
+`scripts/coverage-entry.lisp`'s own header comment enumerates every category
+of uncoverable line, with the experiments that established each one; read it
+before proposing to move either floor in either direction.
 
 ## Source layout
 
@@ -170,11 +229,11 @@ before proposing to raise either floor.
 src/
 ├── package.lisp        both packages, every import/export
 ├── conditions.lisp      cl-cmatrix-error and its subclasses
-├── config.lisp          shared defaults and parallelization threshold
+├── config.lisp          upstream constants, defaults, parallel threshold
 ├── glyphs.lisp           built-in glyph sets, the :charset registry
 ├── color-scheme.lisp     built-in color schemes, their registry
 ├── registry.lisp         shared list-*/​*-p registry-query macro
-├── column.lisp           one falling character stream
+├── column.lisp           one column's cell buffer, both scroll algorithms
 ├── state.lisp            matrix-state, the pure whole-screen struct
 ├── concurrent.lisp       worker configuration and parallel column advance
 ├── render-context.lisp   render-owned style memoization
@@ -184,7 +243,8 @@ src/
 ├── runtime.lisp          terminal session, tick loop, and run-matrix
 ├── cli-options.lisp      declarative command-line option metadata
 └── cli.lisp              cl-cmatrix/cli: flags, main, image-entry-point
-t/                        one test file per source concern above, plus pty-e2e.exp
+t/                        cl-weave specs (see "Running the tests" for how they
+                          map onto src/), plus pty-e2e.exp
 scripts/
 ├── benchmark-suite.sh    repeats the runner, reduces logs to TSV
 ├── benchmark.lisp        the single-process benchmark runner
@@ -195,13 +255,23 @@ docs/                     this site (mkdocs.yml + src/)
 ## Documentation
 
 ```sh
-nix build .#docs --print-build-logs
+nix build .#docs --out-link docs-site --print-build-logs
 ```
 
 `--strict` fails the build on a broken link, a bad anchor, or a page missing
-from `mkdocs.yml`'s `nav`. Exported-symbol changes, lambda-list changes, and
-new or changed conditions belong in the same pull request as the code change
--- see [API reference](../reference/api.md) and
+from `mkdocs.yml`'s `nav`. Pass `--out-link`: without it this build takes the
+default `./result`, and the pseudo-terminal check above then drives whatever
+that symlink last pointed at -- a documentation site with no `bin/` in it.
+
+`t/docs-test.lisp` is the other half of this gate, and runs inside the normal
+suite: it reads `docs/src` live and asserts that every symbol these pages
+qualify with a single-colon package prefix really is exported, and that every
+option spelling shown in a working command really is accepted. It is keyed on
+the context that makes a token a claim, not on the token's shape -- a
+double-colon qualifier is documented as reaching an internal, so it is
+skipped rather than checked. Exported-symbol changes,
+lambda-list changes, and new or changed conditions belong in the same pull
+request as the code change -- see [API reference](../reference/api.md) and
 [Conditions](../reference/conditions.md).
 
 ## Formatting

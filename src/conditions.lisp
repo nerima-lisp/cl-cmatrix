@@ -36,6 +36,15 @@ hand-written :REPORT boilerplate."
   "Signaled by MAKE-MATRIX-STATE or MATRIX-RESIZE when WIDTH or
 HEIGHT is not a positive integer.")
 
+(define-cl-cmatrix-condition invalid-glyphs
+    ((glyphs invalid-glyphs-glyphs))
+    ("GLYPHS must be a non-empty SIMPLE-VECTOR of characters, got ~S."
+     (invalid-glyphs-glyphs condition))
+  "Signaled by MAKE-MATRIX-STATE when GLYPHS is not a non-empty
+SIMPLE-VECTOR every element of which is a CHARACTER. CHARSET-GLYPHS returns a
+vector that always satisfies this, so a caller reaching a glyph set by name
+can never see it.")
+
 (define-cl-cmatrix-condition invalid-speed
     ((speed invalid-speed-speed))
     ("Fall SPEED must be a positive real number, got ~S." (invalid-speed-speed condition))

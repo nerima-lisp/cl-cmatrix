@@ -189,10 +189,43 @@
 ;;;; skip), not by an oversight either project could fix. This was the last
 ;;;; remaining untried avenue; it is now closed by evidence, not assumption.
 
+;;;; 2026-08-09, v1.0.0: the floors move from FIXED-WITH-HEADROOM to a RATCHET,
+;;;; which supersedes the 2026-08-03 decision recorded above to finalize them at
+;;;; 80/90. That decision's reasoning stands on its own terms and is left intact
+;;;; above; what changed is not the evidence but what the numbers are FOR.
+;;;;
+;;;; 80/90 were chosen as floors far enough below the measurement that a
+;;;; harmless refactor could not trip them by chance. The cost of that slack is
+;;;; that it also cannot notice a real regression until 6.65 points of coverage
+;;;; have already been lost -- and the upstream-conformance rewrite that
+;;;; produced v1.0.0 replaced most of src/ at once, which is exactly the shape
+;;;; of change that can shed coverage quietly. For a release that freezes a
+;;;; public API, "do not silently slide backwards" is worth more than "never
+;;;; fail spuriously".
+;;;;
+;;;; Measured after that rewrite: 87.40% expression, 94.61% branch. The floors
+;;;; below are those values less roughly one point, rounded down to whole
+;;;; numbers. The accepted consequence is the mirror of the old one: a change
+;;;; that legitimately costs more than ~1.4 points of expression coverage now
+;;;; fails the gate and has to be looked at. That is the intended behaviour, not
+;;;; a defect in the threshold -- but it does mean this number is expected to be
+;;;; EDITED UPWARD as coverage improves, rather than left alone for years. Raise
+;;;; it when a measurement clears it; never lower it to make a red gate green.
+;;;;
+;;;; Three of the specific examples in the history above no longer exist, and
+;;;; are left in place because the REASONING they illustrate is still correct:
+;;;; +MAX-TRAIL-LENGTH+ and +MAX-RAW-INTERVAL+ were deleted when the column
+;;;; model became upstream's (cells scanned in place, not a head with a fixed
+;;;; trail), and MAKE-MATRIX-STATE's (SPEED 1) &KEY default went with the SPEED
+;;;; argument itself, which v1.0.0 removed because it was validated and then
+;;;; discarded. COLUMN's slots are now CELLS/HEADS/LENGTH/SPACES/UPDATE rather
+;;;; than the INTERVAL the category-3b note names. The category-5 list is
+;;;; unchanged and still accurate.
+
 (asdf:load-system "cl-cmatrix/test")
 
-(defconstant +minimum-expression-percent+ 80)
-(defconstant +minimum-branch-percent+ 90)
+(defconstant +minimum-expression-percent+ 86)
+(defconstant +minimum-branch-percent+ 93)
 
 (defun script-directory ()
   (make-pathname :name nil

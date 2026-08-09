@@ -30,7 +30,10 @@ COLOR-CHOICE-P in color-scheme.lisp)."
   (list
    (make-option :name "speed" :kind :value :type :float
                 :min 0.1d0 :default 1.0d0
-                :description "Fall speed multiplier; larger falls faster (default 1.0).")
+                :description
+                "Scale the update delay; larger falls faster (default 1.0).
+An extension of ours rather than an upstream flag: it divides -u, so 2
+advances twice as often as the same delay would on its own.")
    (make-option :name "color" :short #\C :kind :value
                 :choices (%cmatrix-color-choices)
                 :default "green"
@@ -41,8 +44,9 @@ scheme per column (default green).")
                 :choices (%cmatrix-charset-choices)
                 :default "ascii"
                 :description
-                "Falling glyph set: ascii, katakana (half-width), binary
-(0/1), or lambda (default ascii).")
+                "Falling glyph set: ascii, classic (the CJK symbols -c
+draws), katakana (half-width -- our extension, and closer to the film than
+upstream's own -c), or binary (0/1) (default ascii).")
    (make-option :name "bold" :short #\b :kind :flag
                 :description "Render selected trail glyphs bold (default off).")
    (make-option :name "all-bold" :short #\B :aliases '("B") :kind :flag
@@ -69,10 +73,15 @@ scheme per column (default green).")
    (make-option :name "rainbow" :short #\r :kind :flag
                 :description "Use a different color scheme for each column.")
    (make-option :name "japanese" :short #\c
-                :aliases '("katakana" "classic") :kind :flag
-                :description "Use the half-width katakana glyph set.")
+                :aliases '("classic") :kind :flag
+                :description
+                "Use the classic CJK Symbols and Punctuation glyph set
+(U+3000 through U+303E), which is what upstream cmatrix's own -c draws. For
+half-width katakana use --charset katakana instead.")
    (make-option :name "lambda" :short #\m :kind :flag
-                :description "Use the lambda glyph set.")
+                :description
+                "Draw every non-head trail character as a lambda. A render
+mode over whichever glyph set is in use, not a glyph set of its own.")
    (make-option :name "screensaver" :short #\s
                 :aliases '("S" "screen-saver") :kind :flag
                 :description "Exit on the first input event.")
@@ -85,11 +94,21 @@ scheme per column (default green).")
                 :kind :value :type :integer
                 :min 0 :max 10 :default +default-update-delay+
                 :description
-                "Upstream update delay in 10 millisecond units (default 4).")
+                "Upstream update delay in 10 millisecond units; a LARGER
+value is SLOWER (default 4). The runtime 0-9 keys reset it to that digit.")
+   ;; :MAX is here for the same reason --fps and -u have one: the value reaches
+   ;; a resource allocation directly. CL-CONCURRENT-KIT's executor starts SIZE
+   ;; OS threads eagerly, so an unbounded --workers is an unbounded thread
+   ;; count, and 64 is already far past any core count this animation could
+   ;; use. It is the only numeric option that was missing a ceiling.
    (make-option :name "workers" :kind :value :type :integer
-                :min 1 :default +default-workers+
+                :min 1 :max 64 :default +default-workers+
                 :description
-                "Maximum number of concurrent column workers (default 4).")
+                "Maximum number of concurrent column workers, 1 to 64 (default
+4). Two conditions gate it, and BOTH must hold or no thread is ever started:
+-a must be on, since this command line defaults to upstream's synchronous
+timing, and the terminal must be at least +PARALLEL-COLUMN-THRESHOLD+ columns
+wide. On a normal terminal neither holds, so this option does nothing.")
    (make-option :name "seed" :kind :value :type :integer
                 :min 0
                 :description
