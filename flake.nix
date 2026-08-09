@@ -255,6 +255,26 @@
       executable = {
         dynamicSpaceSize = 1024;
         installSource = true;
+
+        # ASDF writes the program to the system's `:build-pathname` resolved
+        # against its `:pathname`, and cl-cmatrix.asd sets `:pathname "src"`.
+        # So `program-op` produces `src/cl-cmatrix`, not the `cl-cmatrix` at
+        # the root that cl-nix-forge looks for by default
+        # (lib/batteries/app.nix:294 defaults programPath to the system name,
+        # and :311-313 fails the build when it is not there).
+        #
+        # This was invisible until CI grew a job that builds the binary. The
+        # delivery path is platform-dependent: on Darwin, SBCL cannot dump a
+        # working standalone executable, so cl-nix-forge takes a documented
+        # workaround (app.nix:188) that saves a bare `.core` and wraps `sbcl
+        # --core` -- a path on which this check never runs. Every local build
+        # here is Darwin, so the Linux `program-op` path had never executed
+        # anywhere: `nix flake check` evaluates `packages.*` and reports
+        # "build skipped", and neither ci.yml nor release.yml ran `nix build`.
+        # The first Linux build of the delivered binary in this repository's
+        # history was the pty-e2e job added for v1.0.0, and it failed
+        # immediately.
+        programPath = "src/cl-cmatrix";
       };
 
       # docs/mkdocs.yml + docs/src/, built with `--strict` so a broken link or
