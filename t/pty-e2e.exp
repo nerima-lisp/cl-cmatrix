@@ -47,7 +47,12 @@ proc expect_clean_exit {label transcript} {
     }
 }
 
-set raw_transcript [file join $env(TMPDIR) "cl-cmatrix-pty-raw.transcript"]
+# `file tempfile` and not a fixed name under $TMPDIR: `log_file` opens without
+# O_EXCL and follows symlinks, so a predictable path in a world-writable /tmp
+# lets anyone pre-place a link and have this script overwrite the target. CI is
+# unaffected -- ci.yml points TMPDIR at the job's own $RUNNER_TEMP -- but a
+# maintainer running this by hand on a shared machine is not.
+set raw_transcript [file tempfile]
 log_file -noappend $raw_transcript
 spawn -noecho sh -c {
     stty rows 24 cols 80
@@ -86,7 +91,7 @@ log_file
 file delete -force $raw_transcript
 puts "PASS: raw q exits 0 and restores termios"
 
-set signal_transcript [file join $env(TMPDIR) "cl-cmatrix-pty-sigint.transcript"]
+set signal_transcript [file tempfile]
 log_file -noappend $signal_transcript
 spawn -noecho sh -c {stty rows 24 cols 80; exec "$1" --fps 1 --seed 1} sh $binary
 expect_sequence "alternate-screen entry" $enter_alt $signal_transcript

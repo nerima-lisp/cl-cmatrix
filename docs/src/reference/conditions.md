@@ -16,6 +16,7 @@ than hand-written `:report` boilerplate.
 error
 └── cl-cmatrix-error              (base for everything below)
     ├── invalid-dimensions
+    ├── invalid-glyphs
     ├── invalid-speed
     ├── invalid-fps
     ├── invalid-update-delay
@@ -42,10 +43,35 @@ positive integer.
 | `width` | `invalid-dimensions-width` | The offending width. |
 | `height` | `invalid-dimensions-height` | The offending height. |
 
+## `invalid-glyphs`
+
+Signaled by [`make-matrix-state`](api.md#make-matrix-state) when `glyphs` is
+not a non-empty `simple-vector` every element of which is a character.
+[`run-matrix`](api.md#run-matrix) raises it through that same check, since it
+builds its initial state with `make-matrix-state`.
+
+| Slot | Reader | Value |
+|---|---|---|
+| `glyphs` | `invalid-glyphs-glyphs` | The offending glyph set. |
+
+A vector obtained from [`charset-glyphs`](api.md#charset-glyphs) always
+satisfies the contract, so a caller reaching a glyph set by name can never see
+this condition; it is reachable only by passing a vector of one's own.
+
+The check is at *construction*, and deliberately so. Without it an empty
+`glyphs` was accepted by `make-matrix-state` and failed several
+[`matrix-advance`](api.md#matrix-advance) calls later with a raw `type-error`
+-- which is not a `cl-cmatrix-error`, and so escaped the single
+`handler-case` clause this page promises catches everything. A vector holding
+non-characters was worse: it survived construction and dozens of advances and
+only failed in the renderer.
+
 ## `invalid-speed`
 
-Signaled by [`make-matrix-state`](api.md#make-matrix-state) when `speed` is
-not a positive real number.
+Signaled by [`run-matrix`](api.md#run-matrix) when `speed` is not a positive
+real number. `make-matrix-state` neither signals it nor takes a `speed`
+argument at all: fall speed is the driver loop's concern, not a
+`matrix-state` slot, so `run-matrix` is the only place it can be rejected.
 
 | Slot | Reader | Value |
 |---|---|---|
@@ -75,7 +101,8 @@ matching upstream `cmatrix`; validation happens before terminal setup.
 
 Signaled by [`make-matrix-state`](api.md#make-matrix-state) when `color`
 names no scheme registered in [`list-color-schemes`](api.md#list-color-schemes)
-and is not `:rainbow`.
+and is not `:rainbow`. [`run-matrix`](api.md#run-matrix) raises it through
+that same check, since it builds its initial state with `make-matrix-state`.
 
 | Slot | Reader | Value |
 |---|---|---|

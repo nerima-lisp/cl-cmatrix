@@ -1,3 +1,13 @@
+;;;; src/concurrent.lisp
+;;;;
+;;;; The parallel MATRIX-ADVANCE path. It is deterministic but NOT
+;;;; stream-identical to the serial path: each chunk gets its own child
+;;;; random state (seeded in chunk order before any work is submitted), so
+;;;; worker completion order cannot affect the result. The async update gate
+;;;; is applied here exactly as %MATRIX-ADVANCE-SERIAL applies it, so both
+;;;; paths agree on WHICH columns move on a given frame even though they
+;;;; disagree on which random numbers those columns draw.
+
 (in-package #:cl-cmatrix)
 
 (defun %parallel-random-states (random-state count)
@@ -24,9 +34,10 @@ worker completion order cannot affect the next MATRIX-STATE."
   (let* ((glyphs (matrix-state-glyphs state))
          (random-state (%copy-random-state
                         (matrix-state-random-state state)))
-         (speed (matrix-state-speed state))
          (height (matrix-state-height state))
          (asyncp (matrix-state-asyncp state))
+         (async-count (%next-async-count (matrix-state-async-count state)))
+         (old-style-p (matrix-state-old-style-p state))
          (change-glyphs-p (matrix-state-change-glyphs-p state))
          (old-columns (matrix-state-columns state))
          (count (length old-columns))
@@ -39,15 +50,18 @@ worker completion order cannot affect the next MATRIX-STATE."
                              (let ((local-random-state
                                      (aref random-states chunk-index)))
                                (loop for index from start below end
+                                     for column = (aref old-columns index)
                                      collect
-                                     (%advance-matrix-column
-                                      (aref old-columns index)
-                                      glyphs
-                                      local-random-state
-                                      speed
-                                      height
-                                      :asyncp asyncp
-                                      :change-glyphs-p change-glyphs-p)))))
+                                     (if (%column-advances-p column asyncp
+                                                             async-count)
+                                         (%advance-matrix-column
+                                          column
+                                          glyphs
+                                          local-random-state
+                                          height
+                                          :old-style-p old-style-p
+                                          :change-glyphs-p change-glyphs-p)
+                                         column)))))
                          ranges
                          :max-in-flight (length ranges)))
          (new-columns (make-array count)))
@@ -61,6 +75,7 @@ worker completion order cannot affect the next MATRIX-STATE."
     (let ((new-state (%copy-matrix-state state)))
       (setf (matrix-state-columns new-state) new-columns
             (matrix-state-random-state new-state) random-state
+            (matrix-state-async-count new-state) async-count
             (matrix-state-tick new-state) (1+ (matrix-state-tick state)))
       new-state)))
 

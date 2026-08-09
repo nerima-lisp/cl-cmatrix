@@ -97,14 +97,29 @@
     let
       lib = nixpkgs.lib;
 
-      # x86_64-linux is what CI gates; aarch64-darwin is the development
-      # machine. Every per-system output -- packages, checks, apps AND devShells
-      # -- comes from this one list, so leaving aarch64-darwin out takes `nix
-      # build` and `nix develop` off the development machine as well. That trade
-      # was made on 2026-08-01 and reverted on 2026-08-02; aarch64-darwin carries
-      # no CI gate, which PACKAGE_STANDARD.md's "systems" section accepts
-      # explicitly. aarch64-linux and x86_64-darwin are nobody's verification and
-      # are not declared.
+      # x86_64-linux is what CI gates; aarch64-darwin is the development machine.
+      #
+      # KNOWN, DELIBERATE DEVIATION from PACKAGE_STANDARD.md. That document's
+      # 2026-08-01 revision retracted the two-system decision and now requires
+      # `systems = [ "x86_64-linux" ]` alone, on the argument that declaring a
+      # platform promises it works while the only thing checking it is someone
+      # remembering to run a command locally. The org's own
+      # scripts/check-conformance.sh reports this line as a failure, and that
+      # report is correct rather than a false positive -- do not "fix" it by
+      # editing the checker.
+      #
+      # It is kept anyway because development happens on darwin and the cost of
+      # conforming is total: `mkPackageFlake` derives packages, checks, apps AND
+      # devShells from this one list, so dropping aarch64-darwin would take `nix
+      # build`, `nix develop` and every local `nix flake check` off the machine
+      # the work is done on. The standard names that consequence and accepts it;
+      # this repository accepts the opposite trade, and states which one it is
+      # rather than claiming the standard permits it.
+      #
+      # What the deviation costs, stated so nobody mistakes it for a promise:
+      # aarch64-darwin has no CI gate, so a build that works here is not
+      # evidence it works anywhere. aarch64-linux and x86_64-darwin are nobody's
+      # verification and are not declared at all.
       systems = [
         "x86_64-linux"
         "aarch64-darwin"
@@ -186,6 +201,24 @@
       # `self`. `./.` is the same directory.
       root = ./.;
 
+      # `mkLispSource` keeps an allowlist -- the .asd, run-tests.lisp, scripts,
+      # src, t -- and docs/ is NOT in it, even though `docs.root` below builds
+      # the site from the same tree: that is a separate derivation over a
+      # separate source. t/docs-test.lisp reads docs/src through
+      # `asdf:system-relative-pathname`, exactly as t/mutation-test.lisp reads
+      # src/, so without this line the file is simply absent inside the sandbox
+      # and the check fails at run time with a missing-pathname error that
+      # looks nothing like the doc drift it exists to catch.
+      #
+      # The cost is real and accepted: an edit under docs/src now invalidates
+      # the Lisp derivation and re-runs the whole suite. For a check whose
+      # entire job is to fail when documentation and code disagree, re-running
+      # on a documentation change is the behaviour we want, not a regression.
+      # A path literal, not the string "docs/src": `lib.fileset` rejects
+      # string-like values outright, and the error names `lib.fileset.unions`
+      # rather than this argument.
+      sourceInclude = [ ./docs/src ];
+
       # Source-based sibling systems are built as lispDerivations so their
       # ASDF ancestry is explicit. The pre-built cl-tty-kit package needs
       # fromDerivation because it comes from a sibling flake; its dependency
@@ -248,11 +281,15 @@
       # actual floor is scripts/coverage-entry.lisp's job, run as this
       # ENTRYPOINT -- inside the same already-instrumented process, after
       # MKCOVERAGEREPORT's own force-load, so it only has to load and run the
-      # test suite and read back CL-WEAVE:COVERAGE-STATISTICS. Its floor is
-      # 90% branch (nerima-lisp/.github's TEST_STANDARD.md number, already
-      # cleared) but only 80% expression, WITH REASONS -- see that file's own
-      # header comment before raising either number by editing this line
-      # alone; the 80% one is capped by real testability gaps, not inertia.
+      # test suite and read back CL-WEAVE:COVERAGE-STATISTICS. Since v1.0.0 its
+      # floors are a RATCHET rather than fixed numbers: 86% expression and 93%
+      # branch, each about a point under the measurement they were set from
+      # (87.40% and 94.61%). Both clear nerima-lisp/.github's TEST_STANDARD.md
+      # 90% branch requirement. The numbers live in that file, not here, and
+      # are expected to be edited upward as coverage improves -- read its header
+      # before touching either, because the five categories of line SB-COVER
+      # structurally cannot credit are enumerated there, and they are why
+      # expression coverage has a ceiling well below 100%.
       extraOutputs = ctx: {
         checks.coverage = ctx.cl.mkCoverageReport {
           drv = ctx.package;

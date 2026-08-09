@@ -1,4 +1,19 @@
 ;;;; t/render-test.lisp
+;;;;
+;;;; The renderer's contract changed shape with the upstream-conformance
+;;;; rewrite, so most of what these specs pin down is geometric rather than
+;;;; chromatic: column index I draws at screen x = 2I, internal row R draws at
+;;;; screen row R - ORIGIN, and a cell's distance from its stream's head is
+;;;; recovered at draw time from the maximal non-blank run it sits in.
+;;;;
+;;;; Nearly every MATRIX-DRAW spec installs hand-built COLUMNs rather than
+;;;; advancing a seeded state. An advanced state's contents are whatever the
+;;;; scan produced, so asserting on them means re-deriving the expected frame
+;;;; the same way the renderer does -- an oracle that runs through the code
+;;;; under test and therefore cannot disagree with it. A column written out by
+;;;; hand fixes the expected screen independently. The one spec that does
+;;;; advance a real state asserts only the character-for-character mapping,
+;;;; which needs no offset arithmetic at all, and counts what it checked.
 
 (in-package #:cl-cmatrix/test)
 
@@ -9,33 +24,122 @@ sublists, so ASSOC cannot walk it directly -- ASSOC calls CAR on every
 element, including the bare keywords, which are not conses."
   (find-if (lambda (item) (and (consp item) (eq (first item) :fg))) style))
 
-(defun %non-head-lit-cell (state)
-  "Return (VALUES X ROW) locating the first on-screen lit cell of STATE that
-is not its column's head, or (VALUES NIL NIL) when STATE has none. Only a
-non-head cell distinguishes BOLD from the default, since the head is bold
-either way -- so callers must also assert that they actually got one, or a
-state whose columns happened to show nothing but heads would let the whole
-assertion pass without ever running."
-  (loop for x below (matrix-state-width state)
-        for column = (aref (matrix-state-columns state) x)
-        do (loop for row below (matrix-state-height state)
-                 when (and (column-row-lit-p column row)
-                           (/= row (column-head column)))
-                   do (return-from %non-head-lit-cell (values x row))))
-  (values nil nil))
+(defun %test-column (cells &key heads (length 3))
+  "Return a COLUMN holding CELLS, a list of internal rows whose first element
+is the off-screen staging row 0 (see src/column.lisp's header). HEADS lists
+the internal rows whose head bit is set. Building a column literally is what
+lets a draw's expected screen be written out by hand instead of re-derived."
+  (let* ((vector (coerce cells 'simple-vector))
+         (bits (make-array (length vector) :element-type 'bit :initial-element 0)))
+    (dolist (row heads)
+      (setf (sbit bits row) 1))
+    (cl-cmatrix::%make-column :cells vector :heads bits :length length)))
 
-(defun %drawn-trail-frame (bold)
-  "Advance a fixed-seed 3x24 state 30 ticks under BOLD, draw it, and return
-(VALUES SCREEN X ROW) with X/ROW from %NON-HEAD-LIT-CELL. BOLD feeds no
-random draw, so both BOLD values yield identical columns and therefore the
-same X/ROW -- the two frames differ only in the style at that cell."
-  (let ((state (make-matrix-state 3 24 :bold bold
-                                        :random-state (sb-ext:seed-random-state 30))))
-    (dotimes (i 30) (setf state (matrix-advance state)))
-    (let ((screen (make-screen 3 24)))
-      (matrix-draw screen state (make-render-context))
-      (multiple-value-bind (x row) (%non-head-lit-cell state)
-        (values screen x row)))))
+(defun %state-with-columns (width height columns &rest options)
+  "Return a MATRIX-STATE of WIDTH by HEIGHT whose COLUMNS are exactly the ones
+supplied, with OPTIONS passed on to MAKE-MATRIX-STATE. COLUMNS must hold
+(MATRIX-STATE-COLUMN-COUNT WIDTH) entries, since column I is drawn at x = 2I."
+  (let ((state (apply #'make-matrix-state width height
+                      :random-state (sb-ext:seed-random-state 7) options)))
+    (setf (matrix-state-columns state) (coerce columns 'simple-vector))
+    state))
+
+(defun %draw-state (state)
+  "Draw STATE onto a screen of its own dimensions and return that screen."
+  (let ((screen (make-screen (matrix-state-width state) (matrix-state-height state))))
+    (matrix-draw screen state (make-render-context))
+    screen))
+
+(defun %styles (trail-length &optional bold)
+  "Return a fresh (uncached) style vector of TRAIL-LENGTH entries, the vector
+%DRAW-COLUMN indexes by clamped offset."
+  (cl-cmatrix::%matrix-style-vector :green trail-length bold (make-hash-table :test #'eq)))
+
+(defun %screen-char (screen x y)
+  (cell-char (screen-cell screen x y)))
+
+(defun %screen-style (screen x y)
+  (cell-style (screen-cell screen x y)))
+
+(defun %screen-bold-p (screen x y)
+  "True when the cell drawn at X, Y carries :BOLD. Note a head cell reads
+bold whatever the bold flags say, because the head style itself is bold --
+only a non-head trail cell distinguishes the bold modes."
+  (and (member :bold (%screen-style screen x y)) t))
+
+(defun %expected-lambda ()
+  "Return U+03BB, the character upstream cmatrix's -m mode draws. Fixed here
+independently of CL-CMATRIX::%LAMBDA-GLYPH: a draw spec that compared the
+glyph on screen against that function's own return value would run both sides
+of the comparison through the same implementation, so any substitute
+character -- not just a different lambda -- would satisfy it."
+  (code-char #x3bb))
+
+;;; ---------------------------------------------------------------------------
+;;; Control-character sanitization helpers
+;;;
+;;; MATRIX-DRAW-MESSAGE does not strip control characters -- it puts --message
+;;; on the screen verbatim, and the first spec in the "--message control
+;;; character sanitization" suite below asserts that a screen cell really does
+;;; end up holding #\Nul. What stops that byte from reaching the terminal is
+;;; cl-tty-kit's own write path: %RENDER-SAFE-CELL-CHARACTER (its
+;;; src/render-style.lisp) substitutes #\Space for every character
+;;; %TERMINAL-CONTROL-CHARACTER-P accepts (its src/ansi-osc.lisp: code < #x20,
+;;; code = #x7F, or #x80 <= code <= #x9F).
+;;;
+;;; That defence therefore lives entirely in the dependency, and until these
+;;; specs existed cl-cmatrix had nothing that would go red if a cl-tty-kit
+;;; upgrade dropped it: --message would quietly become a terminal-injection
+;;; vector while this suite stayed green. These specs exist to detect exactly
+;;; that loss. They deliberately observe cl-cmatrix's own output -- the ANSI
+;;; frame CL-TTY-KIT:RENDERER-RENDER hands back, which is the byte stream this
+;;; program writes to the terminal -- and never call the dependency's internal
+;;; predicate by name, since a renamed predicate would break such a spec
+;;; without the defence having weakened, and a deleted one would leave it
+;;; unable to notice at all.
+
+(defun %control-code-p (code)
+  "True for the code points a terminal reads as control bytes: C0 (below
+#x20), DEL (#x7F), and C1 (#x80..#x9F). Restated here from the Unicode ranges
+rather than obtained from cl-tty-kit, so this oracle cannot agree with a
+sanitizer that stopped recognising one of them -- a check that asked the
+dependency which characters are dangerous would move in lockstep with it."
+  (or (< code #x20) (= code #x7f) (<= #x80 code #x9f)))
+
+(defun %control-codes-in (string)
+  "Return the ascending set of control code points STRING contains."
+  (sort (remove-duplicates
+         (loop for character across string
+               for code = (char-code character)
+               when (%control-code-p code)
+                 collect code))
+        #'<))
+
+(defun %message-frame (message &key (width 9) (height 5))
+  "Return the ANSI frame emitted for a screen carrying only MESSAGE. This is
+the byte stream cl-cmatrix hands the terminal, and the only place where a
+control character in --message could act as an escape sequence rather than as
+inert screen contents."
+  (let ((renderer (make-renderer width height)))
+    (cl-tty-kit:renderer-clear renderer)
+    (cl-cmatrix::matrix-draw-message (cl-tty-kit:renderer-screen renderer)
+                                     width height message)
+    (cl-tty-kit:renderer-render renderer)))
+
+(defun %repeated-message (code length)
+  "Return a message of LENGTH copies of the character at CODE."
+  (make-string length :initial-element (code-char code)))
+
+(defun %message-run-state (message &key (width 9) (height 5))
+  "Return a RUN-STATE carrying MESSAGE over an unadvanced (all-blank) matrix,
+so RUN-STATE-RENDER's frame holds the message and nothing else."
+  (let ((run-state (make-run-state
+                    :matrix (make-matrix-state
+                             width height
+                             :random-state (sb-ext:seed-random-state 24))
+                    :renderer (make-renderer width height))))
+    (setf (run-state-message run-state) message)
+    run-state))
 
 (describe "matrix-cell-style"
   (it "renders the head (offset 0) bold in the scheme's head color"
@@ -86,141 +190,15 @@ same X/ROW -- the two frames differ only in the style at that cell."
 
   (it "the head is bold regardless of BOLD, and its color is unaffected by BOLD"
     (expect (equal (matrix-cell-style :green 0 5 nil) (matrix-cell-style :green 0 5 t))
-            :to-be-truthy)))
+            :to-be-truthy))
 
+  ;; Previously registered outside this DESCRIBE by a stray closing paren, so
+  ;; it reported against the root suite rather than MATRIX-CELL-STYLE.
   (it "leaves the head unbold when NO-BOLD is requested"
     (expect (not (member :bold (matrix-cell-style :green 0 5 nil t))) :to-be-truthy))
 
-(describe "matrix-draw"
-  (it "writes each column's currently lit glyphs at their rows, and leaves unlit rows blank"
-    (let ((state (make-matrix-state 3 24 :random-state (sb-ext:seed-random-state 30))))
-      (dotimes (i 30) (setf state (matrix-advance state)))
-      (let ((screen (make-screen 3 24))
-            (column (aref (matrix-state-columns state) 0)))
-        (matrix-draw screen state (make-render-context))
-        (with-soft-assertions
-          (loop for row below 24
-                do (if (column-row-lit-p column row)
-                       (expect (char= (cell-char (screen-cell screen 0 row))
-                                      (column-glyph-at-row column row))
-                               :to-be-truthy)
-                       (expect (char= (cell-char (screen-cell screen 0 row)) #\Space)
-                               :to-be-truthy)))))))
-
-  (it "a :rainbow COLOR draws each column's trail in a different scheme, cycled by index"
-    (let* ((width 3)
-           (state (make-matrix-state width 24 :color :rainbow
-                                      :random-state (sb-ext:seed-random-state 33)))
-           (schemes (list-color-schemes))
-           (checked 0))
-      (dotimes (i 40) (setf state (matrix-advance state)))
-      (let ((screen (make-screen width 24)))
-        (matrix-draw screen state (make-render-context))
-        (with-soft-assertions
-          (loop for x below width
-                for column = (aref (matrix-state-columns state) x)
-                for trail-row = (1- (column-head column))
-                when (and (>= trail-row 0) (< trail-row 24) (column-row-lit-p column trail-row))
-                  do (incf checked)
-                     (expect
-                      (equal (cell-style (screen-cell screen x trail-row))
-                             (matrix-cell-style (nth (mod x (length schemes)) schemes) 1
-                                                 (column-length column)))
-                      :to-be-truthy))
-          ;; Every assertion above sits behind a WHEN, so without this the
-          ;; whole IT reports green on any state where no column happens to
-          ;; show an on-screen trail row -- a hazard of the shape of the
-          ;; loop, not of this particular seed.
-          (expect (plusp checked) :to-be-truthy)))))
-
-  (it "renders a lit non-head row bold when STATE's BOLD is true"
-    (multiple-value-bind (screen x row) (%drawn-trail-frame t)
-      (with-soft-assertions
-        (expect (and x row) :to-be-truthy)
-        (expect (and x row (member :bold (cell-style (screen-cell screen x row))))
-                :to-be-truthy))))
-
-  (it "leaves that same lit non-head row unbold when STATE's BOLD is false"
-    (multiple-value-bind (screen x row) (%drawn-trail-frame nil)
-      (with-soft-assertions
-        (expect (and x row) :to-be-truthy)
-        (expect (and x row (not (member :bold (cell-style (screen-cell screen x row)))))
-                :to-be-truthy))))
-
-  (it "uses STATE's random-bold setting for deterministic trail styles"
-    (let ((state (make-matrix-state 3 24 :random-bold-p t
-                                    :random-state (sb-ext:seed-random-state 31))))
-      (dotimes (i 30) (setf state (matrix-advance state)))
-      (let ((screen (make-screen 3 24)))
-        (matrix-draw screen state (make-render-context))
-        (multiple-value-bind (x row) (%non-head-lit-cell state)
-          (with-soft-assertions
-            (expect (matrix-state-random-bold-p state) :to-be-truthy)
-            (expect (and x row) :to-be-truthy)
-            (expect
-             (eq (not (null (member :bold (cell-style (screen-cell screen x row)))))
-                 (cl-cmatrix::%random-bold-cell-p
-                  x row (matrix-state-tick state)))
-             :to-be-truthy))))))
-
-  (it "selects both plain and bold styles for random-bold cells"
-    (let* ((column (cl-cmatrix::%make-column
-                    :head 3 :length 3 :glyphs #(#\a #\b #\c)))
-           (cache (make-hash-table :test #'eq))
-           (styles (cl-cmatrix::%matrix-style-vector :green 3 nil cache))
-           (bold-styles (cl-cmatrix::%matrix-style-vector :green 3 t cache))
-           (screen (make-screen 1 6)))
-      (cl-cmatrix::%matrix-draw-column
-       screen 0 column 6 styles
-       :bold-styles bold-styles
-       :random-bold-p t
-       :tick 0)
-      (with-soft-assertions
-        (expect (member :bold (cell-style (screen-cell screen 0 3)))
-                :to-be-truthy)
-        (expect (not (member :bold (cell-style (screen-cell screen 0 2))))
-                :to-be-truthy)
-        (expect (member :bold (cell-style (screen-cell screen 0 1)))
-                :to-be-truthy))))
-
-  (it "draws old-style rows with their stored per-glyph bold metadata"
-    (let* ((state (make-matrix-state 1 3 :old-style-p t :partial-bold-p t
-                                     :random-state (sb-ext:seed-random-state 41)))
-           (column (cl-cmatrix::%make-old-style-column
-                    :glyphs (vector #\a nil #\c)
-                    :glyph-bold-p (vector t nil t)
-                    :spaces 0))
-           (screen (make-screen 1 3)))
-      (setf (aref (matrix-state-columns state) 0) column)
-      (matrix-draw screen state (make-render-context))
-      (with-soft-assertions
-        (expect (char= (cell-char (screen-cell screen 0 0)) #\a) :to-be-truthy)
-        (expect (char= (cell-char (screen-cell screen 0 2)) #\c) :to-be-truthy)
-        (expect (member :bold (cell-style (screen-cell screen 0 0))) :to-be-truthy)
-        (expect (member :bold (cell-style (screen-cell screen 0 2)))
-                :to-be-truthy))))
-
-  (it "centers short messages, clips long messages, and ignores empty messages"
-    (let ((short-screen (make-screen 5 4))
-          (long-screen (make-screen 5 4))
-          (empty-screen (make-screen 5 4)))
-      (cl-cmatrix::matrix-draw-message short-screen 5 4 "hi")
-      (cl-cmatrix::matrix-draw-message long-screen 5 4 "toolong")
-      (cl-cmatrix::matrix-draw-message empty-screen 5 4 nil)
-      (cl-cmatrix::matrix-draw-message empty-screen 5 4 "")
-      (with-soft-assertions
-        (expect (char= (cell-char (screen-cell short-screen 0 2)) #\Space)
-                :to-be-truthy)
-        (expect (char= (cell-char (screen-cell short-screen 1 2)) #\h)
-                :to-be-truthy)
-        (expect (char= (cell-char (screen-cell short-screen 2 2)) #\i)
-                :to-be-truthy)
-        (loop for x below 5
-              for expected across "toolo"
-              do (expect (char= (cell-char (screen-cell long-screen x 2)) expected)
-                         :to-be-truthy))
-        (expect (char= (cell-char (screen-cell empty-screen 0 2)) #\Space)
-                :to-be-truthy)))))
+  (it "leaves a bold trail row unbold when NO-BOLD overrides BOLD"
+    (expect (not (member :bold (matrix-cell-style :green 1 5 t t))) :to-be-truthy)))
 
 (describe "%matrix-style-vector"
   (it "returns the identical vector object on a repeat call, rather than recomputing it"
@@ -237,6 +215,16 @@ same X/ROW -- the two frames differ only in the style at that cell."
         (expect (not (eq plain bold)) :to-be-truthy)
         (expect (notevery #'equal plain bold) :to-be-truthy))))
 
+  (it "keys on NO-BOLD too, the fourth and innermost level of the cache"
+    (let* ((cache (make-hash-table :test #'eq))
+           (plain (cl-cmatrix::%matrix-style-vector :green 5 nil cache))
+           (no-bold (cl-cmatrix::%matrix-style-vector :green 5 nil cache t)))
+      (with-soft-assertions
+        (expect (not (eq plain no-bold)) :to-be-truthy)
+        ;; The head is the row NO-BOLD actually changes, so compare offset 0.
+        (expect (member :bold (svref plain 0)) :to-be-truthy)
+        (expect (not (member :bold (svref no-bold 0))) :to-be-truthy))))
+
   (it "fills each offset with MATRIX-CELL-STYLE's own result for that offset"
     (let* ((cache (make-hash-table :test #'eq))
            (styles (cl-cmatrix::%matrix-style-vector :green 5 nil cache)))
@@ -247,76 +235,421 @@ same X/ROW -- the two frames differ only in the style at that cell."
                                 (matrix-cell-style :green offset 5 nil))
                          :to-be-truthy))))))
 
-(describe "%matrix-draw-column"
-  (it "draws nothing at all when the whole column still sits above row 0"
-    (let ((column (cl-cmatrix::%make-column :head -1 :length 4 :glyphs #(#\a #\b #\c #\d)))
-          (styles (cl-cmatrix::%matrix-style-vector :green 4 nil (make-hash-table :test #'eq)))
+(describe "%draw-column"
+  (it "recovers each cell's offset from its run's bottom row, drawing row R at screen row R - 1"
+    ;; Internal rows 1..3 form one run (bottom 3, offsets 2/1/0); the :SPACE at
+    ;; row 4 ends it, so row 5 starts a second run and restarts at offset 0.
+    (let ((column (%test-column (list :empty #\a #\b #\c :space #\d :empty)
+                                :heads '(3 5) :length 4))
+          (styles (%styles 4))
           (screen (make-screen 1 6)))
-      (cl-cmatrix::%matrix-draw-column screen 0 column 6 styles)
+      (cl-cmatrix::%draw-column screen 0 column 1 6 1 styles nil)
       (with-soft-assertions
-        (loop for row below 6
-              do (expect (char= (cell-char (screen-cell screen 0 row)) #\Space)
-                         :to-be-truthy)))))
+        (expect (char= (%screen-char screen 0 0) #\a) :to-be-truthy)
+        (expect (equal (%screen-style screen 0 0) (svref styles 2)) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 1) #\b) :to-be-truthy)
+        (expect (equal (%screen-style screen 0 1) (svref styles 1)) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 2) #\c) :to-be-truthy)
+        (expect (equal (%screen-style screen 0 2) (svref styles 0)) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 3) #\Space) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 4) #\d) :to-be-truthy)
+        (expect (equal (%screen-style screen 0 4) (svref styles 0)) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 5) #\Space) :to-be-truthy))))
 
-  (it "stops at row 0 rather than walking the rest of the trail off the top edge"
-    (let ((column (cl-cmatrix::%make-column :head 1 :length 4 :glyphs #(#\a #\b #\c #\d)))
-          (styles (cl-cmatrix::%matrix-style-vector :green 4 nil (make-hash-table :test #'eq)))
+  (it "clamps a run longer than the style vector to that vector's last index"
+    ;; Five lit rows against three styles: the top three all take index 2
+    ;; rather than running off the end, which a run may legitimately do since
+    ;; it can outgrow the column's nominal LENGTH.
+    (let ((column (%test-column (list :empty #\a #\b #\c #\d #\e :empty)
+                                :heads '(5) :length 3))
+          (styles (%styles 3))
           (screen (make-screen 1 6)))
-      (cl-cmatrix::%matrix-draw-column screen 0 column 6 styles)
+      (cl-cmatrix::%draw-column screen 0 column 1 6 1 styles nil)
       (with-soft-assertions
-        (expect (char= (cell-char (screen-cell screen 0 1)) (column-glyph-at-row column 1))
-                :to-be-truthy)
-        (expect (char= (cell-char (screen-cell screen 0 0)) (column-glyph-at-row column 0))
-                :to-be-truthy)
-        (loop for row from 2 below 6
-              do (expect (char= (cell-char (screen-cell screen 0 row)) #\Space)
-                         :to-be-truthy)))))
+        (loop for row below 3
+              do (expect (equal (%screen-style screen 0 row) (svref styles 2)) :to-be-truthy))
+        (expect (equal (%screen-style screen 0 3) (svref styles 1)) :to-be-truthy)
+        (expect (equal (%screen-style screen 0 4) (svref styles 0)) :to-be-truthy))))
 
-  (it "skips the rows at or past HEIGHT while still drawing the ones below it"
-    (let ((column (cl-cmatrix::%make-column :head 5 :length 4 :glyphs #(#\a #\b #\c #\d)))
-          (styles (cl-cmatrix::%matrix-style-vector :green 4 nil (make-hash-table :test #'eq)))
-          (screen (make-screen 1 6)))
-      (cl-cmatrix::%matrix-draw-column screen 0 column 4 styles)
+  (it "gives a head cell index 0 even where its offset would have selected a dimmer style"
+    ;; Same geometry as the offset spec above, where screen row 0 took index 2.
+    ;; Setting that row's head bit is the only difference.
+    (let ((column (%test-column (list :empty #\a #\b #\c :empty) :heads '(1) :length 4))
+          (styles (%styles 4))
+          (screen (make-screen 1 4)))
+      (cl-cmatrix::%draw-column screen 0 column 1 4 1 styles nil)
       (with-soft-assertions
-        (expect (char= (cell-char (screen-cell screen 0 5)) #\Space) :to-be-truthy)
-        (expect (char= (cell-char (screen-cell screen 0 4)) #\Space) :to-be-truthy)
-        (expect (char= (cell-char (screen-cell screen 0 3)) (column-glyph-at-row column 3))
+        (expect (equal (%screen-style screen 0 0) (svref styles 0)) :to-be-truthy)
+        (expect (not (equal (svref styles 0) (svref styles 2))) :to-be-truthy))))
+
+  (it "draws :head-marker as & and :pipe as | at the brightest trail index"
+    (let ((column (%test-column (list :empty :head-marker :pipe #\z :empty)
+                                :heads '(1) :length 4))
+          (styles (%styles 4))
+          (screen (make-screen 1 4)))
+      (cl-cmatrix::%draw-column screen 0 column 1 4 1 styles nil)
+      (with-soft-assertions
+        (expect (char= (%screen-char screen 0 0) #\&) :to-be-truthy)
+        (expect (equal (%screen-style screen 0 0) (svref styles 0)) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 1) #\|) :to-be-truthy)
+        (expect (equal (%screen-style screen 0 1) (svref styles 1)) :to-be-truthy))))
+
+  (it "clamps :pipe's index to 0 when the style vector holds a single entry"
+    ;; (MIN 1 MAX-OFFSET), not a bare 1: with one style, indexing 1 would be
+    ;; an out-of-bounds SVREF rather than a wrong color.
+    (let ((column (%test-column (list :empty :head-marker :pipe :empty)
+                                :heads '(1) :length 1))
+          (styles (%styles 1))
+          (screen (make-screen 1 3)))
+      (cl-cmatrix::%draw-column screen 0 column 1 3 1 styles nil)
+      (with-soft-assertions
+        (expect (= (length styles) 1) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 1) #\|) :to-be-truthy)
+        (expect (equal (%screen-style screen 0 1) (svref styles 0)) :to-be-truthy))))
+
+  (it "substitutes a lambda for non-head characters only, leaving the head's own character"
+    ;; Upstream's is_head branch runs before its lambda branch, so -m never
+    ;; hides a head. Internal row 3 is the head here and keeps its #\c.
+    (let ((column (%test-column (list :empty #\a #\b #\c :empty) :heads '(3) :length 3))
+          (styles (%styles 3))
+          (screen (make-screen 1 4)))
+      (cl-cmatrix::%draw-column screen 0 column 1 4 1 styles nil :lambda-p t)
+      (with-soft-assertions
+        (expect (char= (%screen-char screen 0 0) (%expected-lambda)) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 1) (%expected-lambda)) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 2) #\c) :to-be-truthy))))
+
+  (it "reads partial-bold parity from the stored character, never from the lambda displayed"
+    ;; #\a is 97 (odd, plain) and #\b is 98 (even, bold), while the lambda is
+    ;; 955 -- odd. Both rows display a lambda, so if parity read the glyph on
+    ;; screen instead of the cell behind it, row 1 would come out plain. The
+    ;; lambda's own parity is asserted here so the discriminator cannot
+    ;; silently stop discriminating if that glyph ever changes.
+    (let ((column (%test-column (list :empty #\a #\b #\c :empty) :heads '(3) :length 3))
+          (styles (%styles 3))
+          (bold-styles (%styles 3 t))
+          (screen (make-screen 1 4)))
+      (cl-cmatrix::%draw-column screen 0 column 1 4 1 styles bold-styles
+                                :lambda-p t :partial-bold-p t)
+      (with-soft-assertions
+        (expect (oddp (char-code (%expected-lambda))) :to-be-truthy)
+        (expect (oddp (char-code #\a)) :to-be-truthy)
+        (expect (evenp (char-code #\b)) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 0) (%expected-lambda)) :to-be-truthy)
+        (expect (not (%screen-bold-p screen 0 0)) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 1) (%expected-lambda)) :to-be-truthy)
+        (expect (%screen-bold-p screen 0 1) :to-be-truthy))))
+
+  (it "draws internal row 0 in old style, and never in new style, from one and the same column"
+    ;; START/END/ORIGIN are the whole difference between the modes: old style
+    ;; passes 0, HEIGHT-1, 0 and new style 1, HEIGHT, 1, so the staging row is
+    ;; on screen in one and absent in the other.
+    (let ((column (%test-column (list #\a :space #\c :empty) :heads '(0) :length 3))
+          (styles (%styles 3))
+          (old (make-screen 1 3))
+          (new (make-screen 1 3)))
+      (cl-cmatrix::%draw-column old 0 column 0 2 0 styles nil)
+      (cl-cmatrix::%draw-column new 0 column 1 3 1 styles nil)
+      (with-soft-assertions
+        (expect (char= (%screen-char old 0 0) #\a) :to-be-truthy)
+        (expect (char= (%screen-char old 0 1) #\Space) :to-be-truthy)
+        (expect (char= (%screen-char old 0 2) #\c) :to-be-truthy)
+        (expect (char= (%screen-char new 0 0) #\Space) :to-be-truthy)
+        (expect (char= (%screen-char new 0 1) #\c) :to-be-truthy)
+        (expect (char= (%screen-char new 0 2) #\Space) :to-be-truthy))))
+
+  (it "leaves the screen untouched for a column holding only :empty and :space"
+    ;; :EMPTY and :SPACE are distinct cell states that must both read blank
+    ;; here, even though only :SPACE arms a spawn in the advance.
+    (let ((column (%test-column (list :empty :space :empty :space :empty) :length 3))
+          (styles (%styles 3))
+          (screen (make-screen 1 4)))
+      (cl-cmatrix::%draw-column screen 0 column 1 4 1 styles nil)
+      (with-soft-assertions
+        (loop for row below 4
+              do (expect (char= (%screen-char screen 0 row) #\Space) :to-be-truthy))))))
+
+(describe "matrix-draw"
+  (it "draws column index I at screen x = 2I and never writes an odd screen column"
+    ;; Upstream's `j += 2` scan, and the single most recognisable thing about
+    ;; how cmatrix looks. Three hand-built columns on a five-wide screen.
+    (let* ((columns (loop for glyph in '(#\a #\b #\c)
+                          collect (%test-column (list :empty :empty glyph :empty :empty)
+                                                :heads '(2) :length 3)))
+           (state (%state-with-columns 5 4 columns))
+           (screen (%draw-state state)))
+      (with-soft-assertions
+        (expect (= (length (matrix-state-columns state)) (matrix-state-column-count 5))
                 :to-be-truthy)
-        (expect (char= (cell-char (screen-cell screen 0 2)) (column-glyph-at-row column 2))
+        (expect (char= (%screen-char screen 0 1) #\a) :to-be-truthy)
+        (expect (char= (%screen-char screen 2 1) #\b) :to-be-truthy)
+        (expect (char= (%screen-char screen 4 1) #\c) :to-be-truthy)
+        (loop for x in '(1 3)
+              do (loop for y below 4
+                       do (expect (char= (%screen-char screen x y) #\Space) :to-be-truthy))))))
+
+  (it "reproduces every character cell of an advanced frame at x = 2I and blanks the rest"
+    ;; The only spec here that draws a state the scan produced. It asserts
+    ;; nothing about offsets or styles -- just that internal row R of column I
+    ;; shows up at (2I, R-1) -- so no expected value is derived the way the
+    ;; renderer derives it. CHECKED guards against a frame that happened to
+    ;; light nothing, which would make every assertion below vacuous.
+    (let ((state (make-matrix-state 21 24 :random-state (sb-ext:seed-random-state 30)))
+          (checked 0))
+      (dotimes (i 60) (setf state (matrix-advance state)))
+      (let ((screen (%draw-state state)))
+        (with-soft-assertions
+          (loop for index below (length (matrix-state-columns state))
+                for column = (svref (matrix-state-columns state) index)
+                do (loop for row from 1 to 24
+                         for cell = (column-cell-at column row)
+                         for drawn = (%screen-char screen (* 2 index) (1- row))
+                         do (if (characterp cell)
+                                (progn (incf checked)
+                                       (expect (char= drawn cell) :to-be-truthy))
+                                (expect (char= drawn #\Space) :to-be-truthy))))
+          (expect (plusp checked) :to-be-truthy)))))
+
+  (it "a :rainbow COLOR draws each column's trail in a different scheme, cycled by index"
+    (let* ((schemes (coerce (list-color-schemes) 'simple-vector))
+           (columns (loop repeat 3
+                          collect (%test-column (list :empty :empty #\a #\b :empty)
+                                                :heads '(3) :length 3)))
+           (state (%state-with-columns 5 4 columns :color :rainbow))
+           (screen (%draw-state state)))
+      (with-soft-assertions
+        ;; Internal row 2 sits one above its run's bottom, so offset 1.
+        (loop for index below 3
+              do (expect (equal (%screen-style screen (* 2 index) 1)
+                                (matrix-cell-style (aref schemes (mod index (length schemes)))
+                                                   1 3))
+                         :to-be-truthy))
+        ;; Adjacent columns must actually differ, or cycling proves nothing.
+        (expect (not (equal (%screen-style screen 0 1) (%screen-style screen 2 1)))
+                :to-be-truthy))))
+
+  (it "renders a lit non-head row bold when STATE's BOLD is true, and plain when it is false"
+    (flet ((trail-bold-p (&rest options)
+             (let* ((columns (loop repeat 2
+                                   collect (%test-column (list :empty :empty #\a #\b :empty)
+                                                         :heads '(3) :length 3)))
+                    (screen (%draw-state (apply #'%state-with-columns 3 4 columns options))))
+               (%screen-bold-p screen 0 1))))
+      (with-soft-assertions
+        (expect (trail-bold-p :bold t) :to-be-truthy)
+        (expect (not (trail-bold-p)) :to-be-truthy))))
+
+  (it "leaves even the head unbold when STATE's NO-BOLD-P is set"
+    ;; The head is the row that distinguishes NO-BOLD-P from plain rendering,
+    ;; since a trail row is already unbold by default.
+    (flet ((head-bold-p (&rest options)
+             (let* ((columns (loop repeat 2
+                                   collect (%test-column (list :empty :empty #\a #\b :empty)
+                                                         :heads '(3) :length 3)))
+                    (screen (%draw-state (apply #'%state-with-columns 3 4 columns options))))
+               (%screen-bold-p screen 0 2))))
+      (with-soft-assertions
+        (expect (head-bold-p) :to-be-truthy)
+        (expect (not (head-bold-p :no-bold-p t)) :to-be-truthy))))
+
+  (it "feeds random-bold the screen x and the internal row, and varies it with the tick"
+    ;; The expected column is written out rather than obtained by calling
+    ;; %RANDOM-BOLD-CELL-P, which would put the predicate on both sides of the
+    ;; comparison and make the difference zero by construction.
+    ;;
+    ;; The cell asserted on belongs to column index 1, which draws at screen
+    ;; x = 2, and sits at internal row 2, which draws at screen row 1. Both
+    ;; coordinates are pinned by the literals: had the renderer passed the
+    ;; column index (1) or the screen row (1) instead, the drawn column would
+    ;; have been (T NIL T NIL) -- the exact complement of what is asserted.
+    (flet ((drawn (tick)
+             (let* ((columns (loop repeat 2
+                                   collect (%test-column (list :empty :empty #\a #\b :empty)
+                                                         :heads '(3) :length 3)))
+                    (state (%state-with-columns 3 4 columns :random-bold-p t)))
+               (setf (matrix-state-tick state) tick)
+               (%screen-bold-p (%draw-state state) 2 1))))
+      (with-soft-assertions
+        (loop for tick from 0
+              for expected in '(nil t nil t)
+              do (expect (eq (drawn tick) expected) :to-be-truthy)))))
+
+  (it "draws an old-style column's markers from internal row 0 down"
+    ;; OLD-STYLE-P is what puts :HEAD-MARKER and :PIPE on screen at all, and
+    ;; what makes internal row 0 visible instead of a staging row.
+    (let* ((columns (list (%test-column (list :head-marker :pipe #\z :empty)
+                                        :heads '(0) :length 3)
+                          (%test-column (list :empty :empty :empty :empty) :length 3)))
+           (state (%state-with-columns 3 3 columns :old-style-p t))
+           (screen (%draw-state state)))
+      (with-soft-assertions
+        (expect (char= (%screen-char screen 0 0) #\&) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 1) #\|) :to-be-truthy)
+        (expect (char= (%screen-char screen 0 2) #\z) :to-be-truthy)
+        (expect (%screen-bold-p screen 0 0) :to-be-truthy)
+        (expect (not (%screen-bold-p screen 0 1)) :to-be-truthy)
+        (loop for y below 3
+              do (expect (char= (%screen-char screen 1 y) #\Space) :to-be-truthy)))))
+
+  (it "centers short messages, clips long messages, and ignores empty messages"
+    (let ((short-screen (make-screen 5 4))
+          (long-screen (make-screen 5 4))
+          (empty-screen (make-screen 5 4)))
+      (cl-cmatrix::matrix-draw-message short-screen 5 4 "hi")
+      (cl-cmatrix::matrix-draw-message long-screen 5 4 "toolong")
+      (cl-cmatrix::matrix-draw-message empty-screen 5 4 nil)
+      (cl-cmatrix::matrix-draw-message empty-screen 5 4 "")
+      (with-soft-assertions
+        (expect (char= (%screen-char short-screen 0 2) #\Space) :to-be-truthy)
+        (expect (char= (%screen-char short-screen 1 2) #\h) :to-be-truthy)
+        (expect (char= (%screen-char short-screen 2 2) #\i) :to-be-truthy)
+        (loop for x below 5
+              for expected across "toolo"
+              do (expect (char= (%screen-char long-screen x 2) expected) :to-be-truthy))
+        (expect (char= (%screen-char empty-screen 0 2) #\Space) :to-be-truthy)))))
+
+(describe "--message control character sanitization"
+  ;; See the helper header above %CONTROL-CODE-P for why a dependency's
+  ;; behaviour is pinned from this repository at all: the substitution lives in
+  ;; cl-tty-kit, cl-cmatrix is what would ship the hole if it disappeared, and
+  ;; nothing else in this suite would notice.
+
+  (it "puts a control character on the screen verbatim: the substitution is not cl-cmatrix's"
+    ;; This is the spec that makes the frame, rather than the screen, the right
+    ;; observation point for everything below. If MATRIX-DRAW-MESSAGE ever does
+    ;; start filtering, this goes red and says so directly instead of leaving
+    ;; the frame-level specs passing for a reason they no longer describe.
+    ;; A one-character message on a 5-wide, 3-high screen centres at x = 2, y = 1.
+    (let ((screen (make-screen 5 3)))
+      (cl-cmatrix::matrix-draw-message screen 5 3 (string (code-char #x1b)))
+      (expect (= (char-code (%screen-char screen 2 1)) #x1b) :to-be-truthy)))
+
+  (it "emits a benign message's own characters, and frames it with ESC and LF only"
+    ;; The non-vacuity guard for the whole suite. Every spec below compares a
+    ;; control-character frame against this benign one, and both halves of that
+    ;; comparison would be satisfied by a renderer that emitted nothing at all.
+    ;; Asserting the dots arrive proves the message payload really does reach
+    ;; the frame, and pinning the baseline's control set names the two bytes
+    ;; the renderer's own framing (ED/CUP sequences and row separators)
+    ;; legitimately contributes, so the comparisons below are not two empty
+    ;; sets agreeing.
+    (let ((baseline (%message-frame (%repeated-message (char-code #\.) 3))))
+      (with-soft-assertions
+        (expect (= (count #\. baseline) 3) :to-be-truthy)
+        (expect (equal (%control-codes-in baseline) (list #x0a #x1b)) :to-be-truthy))))
+
+  (it-each ((#x00) (#x1b) (#x1f) (#x7f) (#x80) (#x9f))
+      "a message of U+~4,'0X leaves no control byte in the emitted frame"
+      (code)
+    ;; The boundaries of all three ranges cl-tty-kit treats as control bytes:
+    ;; #x00 and #x1F bracket C0 (#x1B, ESC, is the one that would actually
+    ;; start an escape sequence), #x7F is DEL, and #x80/#x9F bracket C1.
+    ;;
+    ;; Counting against the benign baseline rather than asserting bare absence
+    ;; is what lets ESC be tested at all: the frame contains ESC either way, in
+    ;; its own SGR and cursor sequences, so only a count above the baseline's
+    ;; distinguishes a leaked payload byte from the renderer's framing. Both
+    ;; frames carry the same styles at the same positions over messages of the
+    ;; same length, so the framing contribution is identical by construction.
+    ;;
+    ;; The second assertion closes the remaining gap: substituting one control
+    ;; character for a *different* one would satisfy the count on the injected
+    ;; character while still handing the terminal a control byte.
+    (let ((baseline (%message-frame (%repeated-message (char-code #\.) 3)))
+          (probe (%message-frame (%repeated-message code 3))))
+      (with-soft-assertions
+        (expect (= (count (code-char code) probe)
+                   (count (code-char code) baseline))
                 :to-be-truthy)
-        ;; Row 3 is OFFSET 2: the clipped rows above still consumed their
-        ;; offsets, so the visible trail keeps fading from where the
-        ;; off-screen head left off instead of restarting at offset 0.
-        (expect (equal (cell-style (screen-cell screen 0 3)) (svref styles 2))
+        (expect (equal (%control-codes-in probe) (%control-codes-in baseline))
+                :to-be-truthy))))
+
+  (it "passes ordinary characters through untouched: over-sanitizing is a defect too"
+    ;; A sanitizer that crushed everything would satisfy every spec above, so
+    ;; the same frame has to be checked from the other side. #x21 is the first
+    ;; code point clear of C0, #x7E sits immediately below DEL and #xA0
+    ;; immediately above C1's top -- the three places an off-by-one in the
+    ;; ranges would show up -- and the last three are multibyte characters well
+    ;; clear of every range, including a wide (double-width) one.
+    (let* ((codes (list #x21 #x41 #x7e #xa0 #xe9 #x3bb #x3042))
+           (frame (%message-frame (coerce (mapcar #'code-char codes) 'string)
+                                  :width 15)))
+      (with-soft-assertions
+        (loop for code in codes
+              do (expect (find (code-char code) frame) :to-be-truthy)))))
+
+  (it "draws a space message as a styled region rather than dropping it"
+    ;; #\Space is both the code point immediately above C0 and the character
+    ;; the substitution produces, so a passed-through space and an
+    ;; over-sanitized one are the same byte; #x21 above carries the
+    ;; discriminating duty for that boundary. What is observable here is that
+    ;; a space message is drawn at all -- its cells take the message style, so
+    ;; the frame differs from one with no message -- and that drawing it adds
+    ;; no control byte of its own.
+    (let ((spaces (%message-frame "   "))
+          (none (%message-frame nil)))
+      (with-soft-assertions
+        (expect (not (string= spaces none)) :to-be-truthy)
+        (expect (equal (%control-codes-in spaces) (%control-codes-in none))
+                :to-be-truthy))))
+
+  (it "holds for RUN-STATE-RENDER, the path --message actually travels"
+    ;; The specs above call MATRIX-DRAW-MESSAGE directly. This one goes through
+    ;; RUN-STATE-MESSAGE, where the --message option's string is stored and
+    ;; from which every real frame is drawn, so the invariant is pinned on the
+    ;; shipped path and not only on the function under it. The matrix is
+    ;; deliberately left unadvanced, so every cell outside the message is blank
+    ;; and the frame's control bytes are the renderer's framing plus whatever
+    ;; the message contributed.
+    (let ((probe (run-state-render (%message-run-state (%repeated-message #x1b 3))))
+          (baseline (run-state-render (%message-run-state "..."))))
+      (with-soft-assertions
+        (expect (= (count #\. baseline) 3) :to-be-truthy)
+        (expect (= (count (code-char #x1b) probe)
+                   (count (code-char #x1b) baseline))
+                :to-be-truthy)
+        (expect (equal (%control-codes-in probe) (%control-codes-in baseline))
                 :to-be-truthy)))))
 
-  (it "uses character parity when partial-bold metadata is shorter than the glyph vector"
-    (let* ((column (cl-cmatrix::%make-column
-                    :head 3 :length 3
-                    :glyphs (vector #\a #\b #\c)
-                    :glyph-bold-p #()))
-           (cache (make-hash-table :test #'eq))
-           (styles (cl-cmatrix::%matrix-style-vector :green 3 nil cache))
-           (bold-styles (cl-cmatrix::%matrix-style-vector :green 3 t cache))
-           (screen (make-screen 1 4)))
-      (cl-cmatrix::%matrix-draw-column
-       screen 0 column 4 styles
-       :bold-styles bold-styles
-       :partial-bold-p t
-       :glyph-bold-p #())
-      (with-soft-assertions
-        (expect (not (member :bold (cell-style (screen-cell screen 0 2))))
-                :to-be-truthy)
-        (expect (member :bold (cell-style (screen-cell screen 0 1)))
-                :to-be-truthy))))
+(describe "%lambda-glyph"
+  (it "is upstream's own U+03BB, pinned by code point rather than by identity"
+    ;; The -m draw specs above compare against %EXPECTED-LAMBDA, so they pin
+    ;; the renderer to a fixed character; this pins which character upstream
+    ;; chose. Together they are what stops -m from drawing, say, #\A -- a
+    ;; substitution the shape assertions alone would not notice, since 65 is
+    ;; odd just as 955 is.
+    (expect (= (char-code (cl-cmatrix::%lambda-glyph)) #x3bb) :to-be-truthy)))
+
+(describe "%random-bold-cell-p"
+  ;; Literal expected values, computed once from ODDP(3X + 5ROW + TICK) and
+  ;; written out rather than restated as the implementation's own expression,
+  ;; which would only ever agree with itself.
+  ;;
+  ;; What this table can and cannot pin down is worth stating, because the
+  ;; predicate reduces its inputs modulo 2: only the PARITY of each weight is
+  ;; observable, so 3 and 7 name the same function here and no test written
+  ;; against this contract can separate them. What the rows below do fix is
+  ;; that both weights stay odd, that each applies to the argument it applies
+  ;; to now, and that the tick enters with weight 1 -- every change that
+  ;; alters an outcome for some input.
+  (it-each ((0 0 0 nil) (1 0 0 t) (0 1 0 t) (0 0 1 t) (1 1 0 nil)
+            (2 0 0 nil) (0 2 0 nil) (2 1 0 t) (1 2 0 t)
+            (2 2 0 nil) (2 2 1 t) (3 2 1 nil) (1 0 1 nil))
+      "x ~A, row ~A, tick ~A is ~A"
+      (x row tick expected)
+    (expect (cl-cmatrix::%random-bold-cell-p x row tick) :to-equal expected)))
 
 (describe "%column-color"
   (it "returns COLOR unchanged when RAINBOW-SCHEMES is NIL"
     (expect (eq (cl-cmatrix::%column-color 3 :cyan nil) :cyan) :to-be-truthy))
 
   (it "cycles through RAINBOW-SCHEMES by column index, wrapping at its length"
-    (let ((schemes (list-color-schemes)))
+    (let ((schemes (coerce (list-color-schemes) 'simple-vector)))
       (with-soft-assertions
-        (expect (eq (cl-cmatrix::%column-color 0 :rainbow schemes) (first schemes)) :to-be-truthy)
-        (expect (eq (cl-cmatrix::%column-color (length schemes) :rainbow schemes) (first schemes))
+        (expect (eq (cl-cmatrix::%column-color 0 :rainbow schemes) (aref schemes 0))
+                :to-be-truthy)
+        (expect (eq (cl-cmatrix::%column-color (length schemes) :rainbow schemes)
+                    (aref schemes 0))
+                :to-be-truthy)
+        (expect (eq (cl-cmatrix::%column-color 1 :rainbow schemes) (aref schemes 1))
                 :to-be-truthy)))))

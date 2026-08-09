@@ -1,3 +1,20 @@
+;;;; src/run-state.lisp
+;;;;
+;;;; The mutable driver state CL-TTY-KIT's realtime tick loop threads through
+;;;; poll -> advance -> render, and the runtime key bindings that mutate it.
+;;;; MATRIX-STATE stays free of terminal, renderer, executor and timing
+;;;; concerns; all four live here.
+;;;;
+;;;; RUN-STATE owns the animation's PACE, which MATRIX-STATE no longer does.
+;;;; CL-TTY-KIT:TICK-LOOP-RUN-REALTIME binds its :INTERVAL once for the whole
+;;;; loop (cl-tty-kit src/tick-loop.lisp:117-118), so nothing pressed at
+;;;; runtime can change how long it sleeps. The loop therefore always runs at
+;;;; the fixed +BASE-TICK-SECONDS+ and RUN-STATE-ADVANCE counts base ticks,
+;;;; touching the matrix only once every UPDATE-TICKS of them. That is how
+;;;; upstream cmatrix's `napms(update * 10)` -- and its runtime-adjustable
+;;;; `update` -- are reproduced through a loop that cannot re-read its own
+;;;; interval.
+
 (in-package #:cl-cmatrix)
 
 (defstruct (run-state (:constructor make-run-state))
@@ -6,9 +23,15 @@
 MATRIX is the animation state, RENDERER owns terminal output, INPUT-POLLER
 turns the input stream into typed key events, and RENDER-CONTEXT owns drawing
 memoization. WORKERS configures the persistent cl-concurrent-kit worker pool;
-EXECUTOR is that pool, used by wide matrix transitions. Keeping these
-responsibilities here leaves
-MATRIX-STATE free of terminal, renderer, and executor concerns."
+EXECUTOR is that pool, used by wide matrix transitions.
+
+UPDATE-TICKS, BASE-TICK and SPEED are the tick model (see this file's
+header). UPDATE-TICKS is how many base ticks pass between matrix advances --
+the effective delay, never below 1 -- and BASE-TICK counts them off, firing
+an advance and resetting when it reaches UPDATE-TICKS. SPEED is retained
+rather than folded into UPDATE-TICKS because the runtime 0-9 keys set a raw
+upstream update delay, which has to be re-scaled by SPEED to become a new
+UPDATE-TICKS."
   matrix
   renderer
   (quitp nil :type boolean)
@@ -19,12 +42,10 @@ MATRIX-STATE free of terminal, renderer, and executor concerns."
   (render-context (make-render-context) :type render-context)
   (screensaverp nil :type boolean)
   (pausedp nil :type boolean)
-  base-glyphs
+  (update-ticks 1 :type (integer 1 *))
+  (base-tick 0 :type fixnum)
+  (speed +default-speed+)
   message)
-
-(defparameter +run-state-speed-levels+
-  #(0.1d0 0.25d0 0.5d0 0.75d0 1.0d0 1.25d0 1.5d0 2.0d0 3.0d0 4.0d0)
-  "Speed multipliers selected by the runtime 0-9 key bindings.")
 
 (defparameter +run-state-color-keys+
   '((#\! . :red)
@@ -38,6 +59,19 @@ MATRIX-STATE free of terminal, renderer, and executor concerns."
     (#\) . :rainbow))
   "Runtime color-key bindings inherited from the classic cmatrix UI.")
 
+(defun %update-ticks-for-delay (update-delay speed)
+  "Return how many +BASE-TICK-SECONDS+ ticks separate two matrix advances
+when the upstream update delay is UPDATE-DELAY and our --speed extension is
+SPEED.
+
+UPDATE-DELAY is upstream's `update`, in the same 10 millisecond units its
+`napms(update * 10)` uses, which +BASE-TICK-SECONDS+ is deliberately equal
+to -- so at SPEED 1 the tick count and the delay are the same number. SPEED
+divides it, so SPEED 2 advances twice as often. The floor of 1 covers both
+UPDATE-DELAY 0 and any SPEED large enough to round the quotient to zero: the
+matrix can advance at most once per base tick."
+  (max 1 (round (/ update-delay speed))))
+
 (defun %run-state-key-character (event)
   (when (and (typep event 'key-event)
              (eq (key-event-type event) :character)
@@ -45,31 +79,24 @@ MATRIX-STATE free of terminal, renderer, and executor concerns."
              (characterp (key-event-code event)))
     (key-event-code event)))
 
-(defun %run-state-base-glyphs (run-state)
-  "Return the non-lambda glyph set used when toggling lambda mode off."
-  (or (run-state-base-glyphs run-state)
-      (setf (run-state-base-glyphs run-state)
-            (let ((glyphs (matrix-state-glyphs (run-state-matrix run-state))))
-              (if (eq glyphs +lambda-glyphs+)
-                  +default-glyphs+
-                  glyphs)))))
-
 (defun %run-state-change-matrix (run-state &key
-                                             (speed nil speed-p)
                                              (color nil color-p)
                                              (bold nil bold-p)
                                              (partial-bold-p nil partial-bold-p-p)
                                              (no-bold-p nil no-bold-p-p)
+                                             (lambda-p nil lambda-p-p)
                                              (asyncp nil asyncp-p)
                                              (random-bold-p nil random-bold-p-p)
                                              (change-glyphs-p nil change-glyphs-p-p)
                                              (glyphs nil glyphs-p))
-  "Apply supplied animation options as one immutable matrix-state update."
+  "Apply supplied animation options as one immutable matrix-state update.
+
+There is no :SPEED here any more: pace is RUN-STATE's, not MATRIX-STATE's
+(see this file's header), and is changed through %RUN-STATE-SET-UPDATE-DELAY
+instead."
   (let ((matrix (if glyphs-p
                    (%matrix-state-with-glyphs (run-state-matrix run-state) glyphs)
                    (%copy-matrix-state (run-state-matrix run-state)))))
-    (when speed-p
-      (setf (matrix-state-speed matrix) speed))
     (when color-p
       (setf (matrix-state-color matrix) color))
     (when bold-p
@@ -78,6 +105,8 @@ MATRIX-STATE free of terminal, renderer, and executor concerns."
       (setf (matrix-state-partial-bold-p matrix) partial-bold-p))
     (when no-bold-p-p
       (setf (matrix-state-no-bold-p matrix) no-bold-p))
+    (when lambda-p-p
+      (setf (matrix-state-lambda-p matrix) lambda-p))
     (when asyncp-p
       (setf (matrix-state-asyncp matrix) asyncp))
     (when random-bold-p-p
@@ -86,14 +115,15 @@ MATRIX-STATE free of terminal, renderer, and executor concerns."
       (setf (matrix-state-change-glyphs-p matrix) change-glyphs-p))
     (setf (run-state-matrix run-state) matrix)))
 
-(defun %run-state-toggle-lambda (run-state)
-  "Toggle the runtime lambda glyph set without resetting column positions."
-  (let* ((current (matrix-state-glyphs (run-state-matrix run-state)))
-         (glyphs (if (eq current +lambda-glyphs+)
-                     (%run-state-base-glyphs run-state)
-                     +lambda-glyphs+)))
-    (%run-state-change-matrix run-state :glyphs glyphs)
-    :changed))
+(defun %run-state-set-update-delay (run-state update-delay)
+  "Set RUN-STATE's pace from a raw upstream update delay, upstream's
+`update = keypress - 48` for the 0-9 keys. A LARGER delay is SLOWER: 0 is
+the fastest the loop can go and 9 the slowest. The base-tick counter is reset
+so the new pace takes effect from this tick rather than from wherever the old
+count happened to be."
+  (setf (run-state-update-ticks run-state)
+        (%update-ticks-for-delay update-delay (run-state-speed run-state))
+        (run-state-base-tick run-state) 0))
 
 (defun run-state-apply-key-event (run-state event)
   "Apply one pressed runtime command and return its action keyword.
@@ -149,13 +179,15 @@ change, or NIL when EVENT is not a command understood by CL-CMATRIX."
         :change-glyphs-p (not (matrix-state-change-glyphs-p (run-state-matrix run-state))))
        :changed)
       ((char= character #\m)
-       (%run-state-toggle-lambda run-state))
+       (%run-state-change-matrix
+        run-state
+        :lambda-p (not (matrix-state-lambda-p (run-state-matrix run-state))))
+       :changed)
       ((or (char= character #\p) (char= character #\P))
        (setf (run-state-pausedp run-state) (not (run-state-pausedp run-state)))
        :changed)
       ((digit-char-p character)
-       (let ((level (digit-char-p character)))
-         (%run-state-change-matrix run-state :speed (aref +run-state-speed-levels+ level)))
+       (%run-state-set-update-delay run-state (digit-char-p character))
        :changed)
       ((assoc character +run-state-color-keys+ :test #'char=)
        (%run-state-change-matrix
@@ -214,9 +246,32 @@ RUN-STATE. The callback result is returned unchanged."
    :terminal-size-fn terminal-size-fn)
   run-state)
 
+(defun run-state-due-p (run-state)
+  "True when this base tick is the one RUN-STATE's animation advances on.
+
+Called once per base tick by RUN-STATE-ADVANCE, and it mutates: the counter
+is bumped and, on the tick it fires, reset. The comparison is >= rather than
+= so that lowering UPDATE-TICKS at runtime -- a 0-9 key press resets the
+counter, but a resize or a future caller need not -- can never leave the
+counter parked above the threshold with the animation frozen."
+  (let ((base-tick (1+ (run-state-base-tick run-state))))
+    (cond
+      ((>= base-tick (run-state-update-ticks run-state))
+       (setf (run-state-base-tick run-state) 0)
+       t)
+      (t
+       (setf (run-state-base-tick run-state) base-tick)
+       nil))))
+
 (defun run-state-advance (run-state)
-  "Advance RUN-STATE's animation state by one tick unless it is paused."
-  (unless (run-state-pausedp run-state)
+  "Advance RUN-STATE's animation by one frame, but only on the base ticks the
+tick model says are due (RUN-STATE-DUE-P) and only when not paused.
+
+The realtime loop calls this every +BASE-TICK-SECONDS+ so that input polling
+and rendering stay responsive at 100 Hz regardless of how slow the animation
+itself is running; a tick that is not due is a no-op on the matrix."
+  (when (and (run-state-due-p run-state)
+             (not (run-state-pausedp run-state)))
     (setf (run-state-matrix run-state)
           (matrix-advance (run-state-matrix run-state)
                           :executor (run-state-executor run-state)
@@ -243,16 +298,23 @@ RUN-STATE. The callback result is returned unchanged."
 (defun %make-initial-run-state (width height speed color glyphs bold random-state input-stream
                                 &key executor (workers +default-workers+)
                                   (partial-bold-p nil) (no-bold-p nil)
-                                  (old-style-p nil) (asyncp t)
+                                  (old-style-p nil) (lambda-p nil) (asyncp t)
                                   (random-bold-p nil)
                                   (change-glyphs-p nil) (screensaverp nil)
-                                  (lockp nil) message)
-  "Build the animation, renderer, input poller, and render context."
-  (let ((matrix (make-matrix-state width height :speed speed :color color
+                                  (lockp nil) (update-ticks 1) message)
+  "Build the animation, renderer, input poller, render context and tick model.
+
+SPEED reaches no further than the RUN-STATE it is stored on: MAKE-MATRIX-STATE
+has no speed of its own, and RUN-MATRIX has already validated this one. It is
+retained here so the 0-9 keys can re-scale a new update delay by it.
+UPDATE-TICKS is the already-resolved effective delay in base ticks; RUN-MATRIX
+computes it, since only it knows whether --fps or --update-delay won."
+  (let ((matrix (make-matrix-state width height :color color
                                     :glyphs glyphs :bold bold
                                     :partial-bold-p partial-bold-p
                                     :no-bold-p no-bold-p
                                     :old-style-p old-style-p
+                                    :lambda-p lambda-p
                                     :asyncp asyncp
                                     :random-bold-p random-bold-p
                                     :change-glyphs-p change-glyphs-p
@@ -268,9 +330,9 @@ RUN-STATE. The callback result is returned unchanged."
                     :render-context (make-render-context)
                     :screensaverp screensaverp
                     :pausedp nil
-                    :base-glyphs (if (eq glyphs +lambda-glyphs+)
-                                     +default-glyphs+
-                                     glyphs)
+                    :update-ticks update-ticks
+                    :base-tick 0
+                    :speed speed
                     :message (if (and lockp (null message))
                                  "Computer locked."
                                  message))))
