@@ -60,8 +60,8 @@ line) is exactly reproducible."
   ;; sitting alongside it.
   ;;
   ;; Every other nerima-lisp org package was surveyed against this system and
-  ;; deliberately left out, not overlooked: cl-dataflow's "state machine"
-  ;; pulls in cl-prolog as a hard runtime dependency to execute a graph, which
+  ;; deliberately left out, not overlooked: cl-dataflow-kit's "state machine"
+  ;; pulls in cl-prolog-kit as a hard runtime dependency to execute a graph, which
   ;; is strictly more machinery than MATRIX-STATE's two pure
   ;; DEFSTRUCT-transition functions need. cl-boundary-kit targets
   ;; multi-effect application boundaries (filesystem, network, clock, ...);
