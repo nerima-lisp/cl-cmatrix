@@ -1,4 +1,3 @@
-;;;; Reproducible, informational microbenchmarks for cl-cmatrix.
 (require "asdf")
 
 (defconstant +benchmark-seed+ 20260805)

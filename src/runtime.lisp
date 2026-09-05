@@ -1,16 +1,3 @@
-;;;; src/runtime.lisp
-;;;;
-;;;; RUN-MATRIX: the real-time driver that owns the terminal session, the
-;;;; optional worker pool, and the resolution of --fps / --update-delay /
-;;;; --speed into the one number the tick model actually runs on.
-;;;;
-;;;; The loop's own sleep is fixed. CL-TTY-KIT:TICK-LOOP-RUN-REALTIME binds
-;;;; :INTERVAL once, before its loop (cl-tty-kit src/tick-loop.lisp:117-118),
-;;;; so pace cannot be expressed as an interval that runtime keys change.
-;;;; It is expressed as a tick count instead: the loop always sleeps
-;;;; +BASE-TICK-SECONDS+ and RUN-STATE-ADVANCE moves the matrix once every
-;;;; %UPDATE-TICKS of those, which reproduces upstream cmatrix's
-;;;; `napms(update * 10)` while leaving the delay adjustable mid-run.
 
 (in-package #:cl-cmatrix)
 
@@ -36,13 +23,8 @@ ticks. --speed is ours and divides the delay, so SPEED 2 runs twice as fast.
 Otherwise FPS (or +DEFAULT-FPS+) is converted to the nearest whole number of
 base ticks per frame.
 
-DELIBERATE DEVIATION FROM UPSTREAM, chosen rather than overlooked: at `-u 0`
-upstream busy-loops, calling `napms(0)` and redrawing as fast as the terminal
-will take it. We floor at one base tick instead, capping `-u 0` at 100
-frames per second. The animation is indistinguishable at that rate on a real
-terminal, and the alternative is a driver loop that pins a core for as long
-as the screensaver is up -- which is a worse thing for a screensaver to do
-than to be imperceptibly slower than upstream's fastest setting."
+At `-u 0`, upstream busy-loops. This implementation floors the interval at one
+base tick, capping the rate at 100 frames per second."
   (if update-delay
       (%update-ticks-for-delay update-delay speed)
       (max 1 (round (/ 1 (* (%assert-fps (or fps +default-fps+))

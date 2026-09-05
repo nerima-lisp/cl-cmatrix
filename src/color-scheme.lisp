@@ -1,20 +1,3 @@
-;;;; src/color-scheme.lisp
-;;;;
-;;;; Named color schemes for the --color CLI flag and MAKE-MATRIX-STATE.
-;;;; Each scheme is three RGB triples: the head character's color (bright
-;;;; white in every scheme, the classic look), the color the trail is
-;;;; brightest at just behind the head, and the color it dims toward at its
-;;;; tail (black in every scheme, so a trail fades into the terminal
-;;;; background). :BLACK intentionally keeps both trail colors black while
-;;;; preserving the white head. MATRIX-CELL-STYLE in render.lisp maps these through
-;;;; CL-TTY-KIT:RGB-TO-256 to actual xterm 256-color indices.
-;;;;
-;;;; :RAINBOW is a further --color choice, but deliberately not an entry in
-;;;; +COLOR-SCHEMES+: it has no RGB triples of its own, and instead means
-;;;; "resolve a real registered scheme per column" -- see MATRIX-DRAW in
-;;;; render.lisp, the only place that resolution happens. COLOR-CHOICE-P is
-;;;; the predicate that accepts both a real scheme name and :RAINBOW; use it,
-;;;; not COLOR-SCHEME-P, to validate anything read from --color.
 
 (in-package #:cl-cmatrix)
 

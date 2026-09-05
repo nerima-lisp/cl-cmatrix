@@ -1,22 +1,3 @@
-;;;; src/state.lisp
-;;;;
-;;;; MATRIX-STATE bundles the COLUMNs of one animation with the shared inputs
-;;;; that govern them: the injected RANDOM-STATE (see glyphs.lisp and
-;;;; column.lisp -- the single source of randomness every column's timing and
-;;;; glyph choice is drawn from, which is what makes a whole run reproducible
-;;;; from a fixed seed), the COLOR scheme name, the GLYPHS set columns draw
-;;;; from, and the render-mode flags.
-;;;;
-;;;; COLUMNS is deliberately NOT one entry per screen column. Upstream
-;;;; cmatrix scans `for (j = 0; j <= COLS - 1; j += 2)`, so it animates every
-;;;; other screen column and leaves the odd ones permanently blank. That gap
-;;;; is the single most recognisable thing about how cmatrix looks, so we
-;;;; store (CEILING WIDTH 2) columns and render index I at screen x = 2I.
-;;;;
-;;;; Timing is likewise upstream's, not ours. There is no per-column tick
-;;;; interval any more: ASYNC-COUNT cycles 1..+ASYNC-COUNT-CYCLE+ and a
-;;;; column advances on a frame only when the count exceeds its own UPDATE
-;;;; threshold, which is upstream's `count > updates[j] || asynch == 0`.
 
 (in-package #:cl-cmatrix)
 
@@ -56,19 +37,7 @@ RAINBOW-SCHEMES caches the color registry as a simple vector when COLOR is
 
 (defun %assert-glyphs (glyphs)
   "Signal INVALID-GLYPHS unless GLYPHS is a non-empty SIMPLE-VECTOR whose
-every element is a CHARACTER -- the contract MAKE-MATRIX-STATE's :GLYPHS has
-always documented and, until this validator existed, never enforced.
-
-The element scan is O(N) where the other two checks are O(1), which is worth
-the cost for two reasons. It runs once per construction, against a vector the
-built-in sets size at 90 elements or fewer, inside a constructor that already
-spawns (CEILING WIDTH 2) columns and draws a glyph for each -- so it is
-dominated by work the caller is paying for anyway. And a non-character element
-is precisely the violation nothing downstream catches in time: a wrong-typed
-GLYPHS reaches AREF and an empty one reaches RANDOM's zero limit, both within
-a few frames, but a vector of non-characters flows through RANDOM-GLYPH into
-the column cells and survives construction and dozens of advances before
-failing in the renderer, far from the call that supplied it."
+every element is a CHARACTER."
   (unless (and (typep glyphs 'simple-vector)
                (plusp (length glyphs))
                (every #'characterp glyphs))
@@ -109,11 +78,9 @@ nondeterministic one, matching CL:MAKE-RANDOM-STATE's own T argument). The
 supplied random state is copied, so constructing a state never mutates
 caller-owned randomness.
 
-There is deliberately no SPEED argument. Fall speed is no longer a per-column
-interval: the driver loop owns it, ticking at +BASE-TICK-SECONDS+ and
-advancing the matrix every so many ticks, so nothing here could have used the
-value. RUN-MATRIX still takes :SPEED and still signals INVALID-SPEED on a bad
-one.
+Fall speed is controlled by RUN-MATRIX, which advances the state at
++BASE-TICK-SECONDS+. RUN-MATRIX still takes :SPEED and signals INVALID-SPEED
+for a bad value.
 
 COLOR names one of LIST-COLOR-SCHEMES, or :RAINBOW to draw each column from a
 different scheme (default :GREEN). GLYPHS is the non-empty character set
@@ -131,7 +98,6 @@ and INVALID-GLYPHS when GLYPHS is not a non-empty SIMPLE-VECTOR of
 characters. All three are checked before a single column is spawned, so a
 rejected call allocates nothing."
   (%assert-dimensions width height)
-  ;; Signals UNKNOWN-COLOR-SCHEME up front, before spawning columns.
   (unless (color-choice-p color) (error 'unknown-color-scheme :name color))
   (%assert-glyphs glyphs)
   (let ((random-state (%copy-random-state random-state)))
@@ -214,8 +180,7 @@ STATE or its RANDOM-STATE object; the returned state owns the advanced copy."
 (defun matrix-resize (state new-width new-height)
   "Return a new MATRIX-STATE reflowed to NEW-WIDTH by NEW-HEIGHT screen
 cells. A height change reflows every column's buffer, preserving the rows
-that remain visible (see %RESIZE-COLUMN, and note this is deliberately not
-upstream's full re-initialisation). A width change keeps the surviving
+that remain visible (see %RESIZE-COLUMN). A width change keeps the surviving
 columns as they were, spawns fresh ones -- drawn from a copy of STATE's
 RANDOM-STATE, so a resize mid-run is exactly as reproducible as everything
 else -- for newly exposed ones, and drops the rightmost ones when narrowing.

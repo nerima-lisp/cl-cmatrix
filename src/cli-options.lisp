@@ -1,7 +1,3 @@
-;;;; src/cli-options.lisp
-;;;;
-;;;; Declarative command-line metadata kept separate from the process and
-;;;; terminal entry points in cli.lisp.
 
 (in-package #:cl-cmatrix/cli)
 
@@ -96,11 +92,6 @@ mode over whichever glyph set is in use, not a glyph set of its own.")
                 :description
                 "Upstream update delay in 10 millisecond units; a LARGER
 value is SLOWER (default 4). The runtime 0-9 keys reset it to that digit.")
-   ;; :MAX is here for the same reason --fps and -u have one: the value reaches
-   ;; a resource allocation directly. CL-CONCURRENT-KIT's executor starts SIZE
-   ;; OS threads eagerly, so an unbounded --workers is an unbounded thread
-   ;; count, and 64 is already far past any core count this animation could
-   ;; use. It is the only numeric option that was missing a ceiling.
    (make-option :name "workers" :kind :value :type :integer
                 :min 1 :max 64 :default +default-workers+
                 :description

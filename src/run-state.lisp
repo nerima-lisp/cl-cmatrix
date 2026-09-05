@@ -1,19 +1,3 @@
-;;;; src/run-state.lisp
-;;;;
-;;;; The mutable driver state CL-TTY-KIT's realtime tick loop threads through
-;;;; poll -> advance -> render, and the runtime key bindings that mutate it.
-;;;; MATRIX-STATE stays free of terminal, renderer, executor and timing
-;;;; concerns; all four live here.
-;;;;
-;;;; RUN-STATE owns the animation's PACE, which MATRIX-STATE no longer does.
-;;;; CL-TTY-KIT:TICK-LOOP-RUN-REALTIME binds its :INTERVAL once for the whole
-;;;; loop (cl-tty-kit src/tick-loop.lisp:117-118), so nothing pressed at
-;;;; runtime can change how long it sleeps. The loop therefore always runs at
-;;;; the fixed +BASE-TICK-SECONDS+ and RUN-STATE-ADVANCE counts base ticks,
-;;;; touching the matrix only once every UPDATE-TICKS of them. That is how
-;;;; upstream cmatrix's `napms(update * 10)` -- and its runtime-adjustable
-;;;; `update` -- are reproduced through a loop that cannot re-read its own
-;;;; interval.
 
 (in-package #:cl-cmatrix)
 
@@ -64,9 +48,9 @@ UPDATE-TICKS."
 when the upstream update delay is UPDATE-DELAY and our --speed extension is
 SPEED.
 
-UPDATE-DELAY is upstream's `update`, in the same 10 millisecond units its
-`napms(update * 10)` uses, which +BASE-TICK-SECONDS+ is deliberately equal
-to -- so at SPEED 1 the tick count and the delay are the same number. SPEED
+UPDATE-DELAY is upstream's `update`, in the same 10 millisecond units as
+`napms(update * 10)`. +BASE-TICK-SECONDS+ has that same duration, so at
+SPEED 1 the tick count and the delay are the same number. SPEED
 divides it, so SPEED 2 advances twice as often. The floor of 1 covers both
 UPDATE-DELAY 0 and any SPEED large enough to round the quotient to zero: the
 matrix can advance at most once per base tick."

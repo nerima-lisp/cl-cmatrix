@@ -1,26 +1,3 @@
-;;;; src/render.lisp
-;;;;
-;;;; Draws a MATRIX-STATE's current frame onto a CL-TTY-KIT screen. Column
-;;;; index I is drawn at screen x = 2I, mirroring upstream cmatrix's
-;;;; every-other-column scan; odd screen columns are never touched.
-;;;;
-;;;; Upstream colours a whole stream in one colour and only its head white.
-;;;; We deliberately keep our own model instead: MATRIX-CELL-STYLE blends the
-;;;; scheme's bright RGB toward its dark RGB with distance from the head, so
-;;;; a stream fades rather than stopping flat, and :RAINBOW gives each column
-;;;; its own scheme. That is the one place this system diverges from upstream
-;;;; on purpose rather than by omission.
-;;;;
-;;;; Because a COLUMN no longer has a moving head with a known trail behind
-;;;; it, "distance from the head" has to be recovered at draw time: the
-;;;; renderer scans for maximal runs of non-blank cells and treats each run's
-;;;; bottom row as its head end, so a cell's offset is BOTTOM - ROW. That
-;;;; offset is clamped to the style vector's last index, since a run may
-;;;; legitimately grow past the column's nominal LENGTH.
-;;;;
-;;;; All per-cell writes happen inside one CL-TTY-KIT:WITH-SCREEN-BATCH so a
-;;;; full frame coalesces into a single dirty-tracking generation instead of
-;;;; one per cell, and every style is memoised in the RENDER-CONTEXT's cache.
 
 (in-package #:cl-cmatrix)
 

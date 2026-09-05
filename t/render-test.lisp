@@ -1,19 +1,3 @@
-;;;; t/render-test.lisp
-;;;;
-;;;; The renderer's contract changed shape with the upstream-conformance
-;;;; rewrite, so most of what these specs pin down is geometric rather than
-;;;; chromatic: column index I draws at screen x = 2I, internal row R draws at
-;;;; screen row R - ORIGIN, and a cell's distance from its stream's head is
-;;;; recovered at draw time from the maximal non-blank run it sits in.
-;;;;
-;;;; Nearly every MATRIX-DRAW spec installs hand-built COLUMNs rather than
-;;;; advancing a seeded state. An advanced state's contents are whatever the
-;;;; scan produced, so asserting on them means re-deriving the expected frame
-;;;; the same way the renderer does -- an oracle that runs through the code
-;;;; under test and therefore cannot disagree with it. A column written out by
-;;;; hand fixes the expected screen independently. The one spec that does
-;;;; advance a real state asserts only the character-for-character mapping,
-;;;; which needs no offset arithmetic at all, and counts what it checked.
 
 (in-package #:cl-cmatrix/test)
 
@@ -75,28 +59,6 @@ of the comparison through the same implementation, so any substitute
 character -- not just a different lambda -- would satisfy it."
   (code-char #x3bb))
 
-;;; ---------------------------------------------------------------------------
-;;; Control-character sanitization helpers
-;;;
-;;; MATRIX-DRAW-MESSAGE does not strip control characters -- it puts --message
-;;; on the screen verbatim, and the first spec in the "--message control
-;;; character sanitization" suite below asserts that a screen cell really does
-;;; end up holding #\Nul. What stops that byte from reaching the terminal is
-;;; cl-tty-kit's own write path: %RENDER-SAFE-CELL-CHARACTER (its
-;;; src/render-style.lisp) substitutes #\Space for every character
-;;; %TERMINAL-CONTROL-CHARACTER-P accepts (its src/ansi-osc.lisp: code < #x20,
-;;; code = #x7F, or #x80 <= code <= #x9F).
-;;;
-;;; That defence therefore lives entirely in the dependency, and until these
-;;; specs existed cl-cmatrix had nothing that would go red if a cl-tty-kit
-;;; upgrade dropped it: --message would quietly become a terminal-injection
-;;; vector while this suite stayed green. These specs exist to detect exactly
-;;; that loss. They deliberately observe cl-cmatrix's own output -- the ANSI
-;;; frame CL-TTY-KIT:RENDERER-RENDER hands back, which is the byte stream this
-;;; program writes to the terminal -- and never call the dependency's internal
-;;; predicate by name, since a renamed predicate would break such a spec
-;;; without the defence having weakened, and a deleted one would leave it
-;;; unable to notice at all.
 
 (defun %control-code-p (code)
   "True for the code points a terminal reads as control bytes: C0 (below
@@ -192,8 +154,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
     (expect (equal (matrix-cell-style :green 0 5 nil) (matrix-cell-style :green 0 5 t))
             :to-be-truthy))
 
-  ;; Previously registered outside this DESCRIBE by a stray closing paren, so
-  ;; it reported against the root suite rather than MATRIX-CELL-STYLE.
   (it "leaves the head unbold when NO-BOLD is requested"
     (expect (not (member :bold (matrix-cell-style :green 0 5 nil t))) :to-be-truthy))
 
@@ -221,7 +181,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
            (no-bold (cl-cmatrix::%matrix-style-vector :green 5 nil cache t)))
       (with-soft-assertions
         (expect (not (eq plain no-bold)) :to-be-truthy)
-        ;; The head is the row NO-BOLD actually changes, so compare offset 0.
         (expect (member :bold (svref plain 0)) :to-be-truthy)
         (expect (not (member :bold (svref no-bold 0))) :to-be-truthy))))
 
@@ -237,8 +196,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
 
 (describe "%draw-column"
   (it "recovers each cell's offset from its run's bottom row, drawing row R at screen row R - 1"
-    ;; Internal rows 1..3 form one run (bottom 3, offsets 2/1/0); the :SPACE at
-    ;; row 4 ends it, so row 5 starts a second run and restarts at offset 0.
     (let ((column (%test-column (list :empty #\a #\b #\c :space #\d :empty)
                                 :heads '(3 5) :length 4))
           (styles (%styles 4))
@@ -257,9 +214,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
         (expect (char= (%screen-char screen 0 5) #\Space) :to-be-truthy))))
 
   (it "clamps a run longer than the style vector to that vector's last index"
-    ;; Five lit rows against three styles: the top three all take index 2
-    ;; rather than running off the end, which a run may legitimately do since
-    ;; it can outgrow the column's nominal LENGTH.
     (let ((column (%test-column (list :empty #\a #\b #\c #\d #\e :empty)
                                 :heads '(5) :length 3))
           (styles (%styles 3))
@@ -272,8 +226,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
         (expect (equal (%screen-style screen 0 4) (svref styles 0)) :to-be-truthy))))
 
   (it "gives a head cell index 0 even where its offset would have selected a dimmer style"
-    ;; Same geometry as the offset spec above, where screen row 0 took index 2.
-    ;; Setting that row's head bit is the only difference.
     (let ((column (%test-column (list :empty #\a #\b #\c :empty) :heads '(1) :length 4))
           (styles (%styles 4))
           (screen (make-screen 1 4)))
@@ -295,8 +247,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
         (expect (equal (%screen-style screen 0 1) (svref styles 1)) :to-be-truthy))))
 
   (it "clamps :pipe's index to 0 when the style vector holds a single entry"
-    ;; (MIN 1 MAX-OFFSET), not a bare 1: with one style, indexing 1 would be
-    ;; an out-of-bounds SVREF rather than a wrong color.
     (let ((column (%test-column (list :empty :head-marker :pipe :empty)
                                 :heads '(1) :length 1))
           (styles (%styles 1))
@@ -308,8 +258,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
         (expect (equal (%screen-style screen 0 1) (svref styles 0)) :to-be-truthy))))
 
   (it "substitutes a lambda for non-head characters only, leaving the head's own character"
-    ;; Upstream's is_head branch runs before its lambda branch, so -m never
-    ;; hides a head. Internal row 3 is the head here and keeps its #\c.
     (let ((column (%test-column (list :empty #\a #\b #\c :empty) :heads '(3) :length 3))
           (styles (%styles 3))
           (screen (make-screen 1 4)))
@@ -320,11 +268,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
         (expect (char= (%screen-char screen 0 2) #\c) :to-be-truthy))))
 
   (it "reads partial-bold parity from the stored character, never from the lambda displayed"
-    ;; #\a is 97 (odd, plain) and #\b is 98 (even, bold), while the lambda is
-    ;; 955 -- odd. Both rows display a lambda, so if parity read the glyph on
-    ;; screen instead of the cell behind it, row 1 would come out plain. The
-    ;; lambda's own parity is asserted here so the discriminator cannot
-    ;; silently stop discriminating if that glyph ever changes.
     (let ((column (%test-column (list :empty #\a #\b #\c :empty) :heads '(3) :length 3))
           (styles (%styles 3))
           (bold-styles (%styles 3 t))
@@ -341,9 +284,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
         (expect (%screen-bold-p screen 0 1) :to-be-truthy))))
 
   (it "draws internal row 0 in old style, and never in new style, from one and the same column"
-    ;; START/END/ORIGIN are the whole difference between the modes: old style
-    ;; passes 0, HEIGHT-1, 0 and new style 1, HEIGHT, 1, so the staging row is
-    ;; on screen in one and absent in the other.
     (let ((column (%test-column (list #\a :space #\c :empty) :heads '(0) :length 3))
           (styles (%styles 3))
           (old (make-screen 1 3))
@@ -359,8 +299,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
         (expect (char= (%screen-char new 0 2) #\Space) :to-be-truthy))))
 
   (it "leaves the screen untouched for a column holding only :empty and :space"
-    ;; :EMPTY and :SPACE are distinct cell states that must both read blank
-    ;; here, even though only :SPACE arms a spawn in the advance.
     (let ((column (%test-column (list :empty :space :empty :space :empty) :length 3))
           (styles (%styles 3))
           (screen (make-screen 1 4)))
@@ -371,8 +309,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
 
 (describe "matrix-draw"
   (it "draws column index I at screen x = 2I and never writes an odd screen column"
-    ;; Upstream's `j += 2` scan, and the single most recognisable thing about
-    ;; how cmatrix looks. Three hand-built columns on a five-wide screen.
     (let* ((columns (loop for glyph in '(#\a #\b #\c)
                           collect (%test-column (list :empty :empty glyph :empty :empty)
                                                 :heads '(2) :length 3)))
@@ -389,11 +325,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
                        do (expect (char= (%screen-char screen x y) #\Space) :to-be-truthy))))))
 
   (it "reproduces every character cell of an advanced frame at x = 2I and blanks the rest"
-    ;; The only spec here that draws a state the scan produced. It asserts
-    ;; nothing about offsets or styles -- just that internal row R of column I
-    ;; shows up at (2I, R-1) -- so no expected value is derived the way the
-    ;; renderer derives it. CHECKED guards against a frame that happened to
-    ;; light nothing, which would make every assertion below vacuous.
     (let ((state (make-matrix-state 21 24 :random-state (sb-ext:seed-random-state 30)))
           (checked 0))
       (dotimes (i 60) (setf state (matrix-advance state)))
@@ -418,13 +349,11 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
            (state (%state-with-columns 5 4 columns :color :rainbow))
            (screen (%draw-state state)))
       (with-soft-assertions
-        ;; Internal row 2 sits one above its run's bottom, so offset 1.
         (loop for index below 3
               do (expect (equal (%screen-style screen (* 2 index) 1)
                                 (matrix-cell-style (aref schemes (mod index (length schemes)))
                                                    1 3))
                          :to-be-truthy))
-        ;; Adjacent columns must actually differ, or cycling proves nothing.
         (expect (not (equal (%screen-style screen 0 1) (%screen-style screen 2 1)))
                 :to-be-truthy))))
 
@@ -440,8 +369,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
         (expect (not (trail-bold-p)) :to-be-truthy))))
 
   (it "leaves even the head unbold when STATE's NO-BOLD-P is set"
-    ;; The head is the row that distinguishes NO-BOLD-P from plain rendering,
-    ;; since a trail row is already unbold by default.
     (flet ((head-bold-p (&rest options)
              (let* ((columns (loop repeat 2
                                    collect (%test-column (list :empty :empty #\a #\b :empty)
@@ -453,15 +380,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
         (expect (not (head-bold-p :no-bold-p t)) :to-be-truthy))))
 
   (it "feeds random-bold the screen x and the internal row, and varies it with the tick"
-    ;; The expected column is written out rather than obtained by calling
-    ;; %RANDOM-BOLD-CELL-P, which would put the predicate on both sides of the
-    ;; comparison and make the difference zero by construction.
-    ;;
-    ;; The cell asserted on belongs to column index 1, which draws at screen
-    ;; x = 2, and sits at internal row 2, which draws at screen row 1. Both
-    ;; coordinates are pinned by the literals: had the renderer passed the
-    ;; column index (1) or the screen row (1) instead, the drawn column would
-    ;; have been (T NIL T NIL) -- the exact complement of what is asserted.
     (flet ((drawn (tick)
              (let* ((columns (loop repeat 2
                                    collect (%test-column (list :empty :empty #\a #\b :empty)
@@ -475,8 +393,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
               do (expect (eq (drawn tick) expected) :to-be-truthy)))))
 
   (it "draws an old-style column's markers from internal row 0 down"
-    ;; OLD-STYLE-P is what puts :HEAD-MARKER and :PIPE on screen at all, and
-    ;; what makes internal row 0 visible instead of a staging row.
     (let* ((columns (list (%test-column (list :head-marker :pipe #\z :empty)
                                         :heads '(0) :length 3)
                           (%test-column (list :empty :empty :empty :empty) :length 3)))
@@ -509,30 +425,13 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
         (expect (char= (%screen-char empty-screen 0 2) #\Space) :to-be-truthy)))))
 
 (describe "--message control character sanitization"
-  ;; See the helper header above %CONTROL-CODE-P for why a dependency's
-  ;; behaviour is pinned from this repository at all: the substitution lives in
-  ;; cl-tty-kit, cl-cmatrix is what would ship the hole if it disappeared, and
-  ;; nothing else in this suite would notice.
 
   (it "puts a control character on the screen verbatim: the substitution is not cl-cmatrix's"
-    ;; This is the spec that makes the frame, rather than the screen, the right
-    ;; observation point for everything below. If MATRIX-DRAW-MESSAGE ever does
-    ;; start filtering, this goes red and says so directly instead of leaving
-    ;; the frame-level specs passing for a reason they no longer describe.
-    ;; A one-character message on a 5-wide, 3-high screen centres at x = 2, y = 1.
     (let ((screen (make-screen 5 3)))
       (cl-cmatrix::matrix-draw-message screen 5 3 (string (code-char #x1b)))
       (expect (= (char-code (%screen-char screen 2 1)) #x1b) :to-be-truthy)))
 
   (it "emits a benign message's own characters, and frames it with ESC and LF only"
-    ;; The non-vacuity guard for the whole suite. Every spec below compares a
-    ;; control-character frame against this benign one, and both halves of that
-    ;; comparison would be satisfied by a renderer that emitted nothing at all.
-    ;; Asserting the dots arrive proves the message payload really does reach
-    ;; the frame, and pinning the baseline's control set names the two bytes
-    ;; the renderer's own framing (ED/CUP sequences and row separators)
-    ;; legitimately contributes, so the comparisons below are not two empty
-    ;; sets agreeing.
     (let ((baseline (%message-frame (%repeated-message (char-code #\.) 3))))
       (with-soft-assertions
         (expect (= (count #\. baseline) 3) :to-be-truthy)
@@ -541,20 +440,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
   (it-each ((#x00) (#x1b) (#x1f) (#x7f) (#x80) (#x9f))
       "a message of U+~4,'0X leaves no control byte in the emitted frame"
       (code)
-    ;; The boundaries of all three ranges cl-tty-kit treats as control bytes:
-    ;; #x00 and #x1F bracket C0 (#x1B, ESC, is the one that would actually
-    ;; start an escape sequence), #x7F is DEL, and #x80/#x9F bracket C1.
-    ;;
-    ;; Counting against the benign baseline rather than asserting bare absence
-    ;; is what lets ESC be tested at all: the frame contains ESC either way, in
-    ;; its own SGR and cursor sequences, so only a count above the baseline's
-    ;; distinguishes a leaked payload byte from the renderer's framing. Both
-    ;; frames carry the same styles at the same positions over messages of the
-    ;; same length, so the framing contribution is identical by construction.
-    ;;
-    ;; The second assertion closes the remaining gap: substituting one control
-    ;; character for a *different* one would satisfy the count on the injected
-    ;; character while still handing the terminal a control byte.
     (let ((baseline (%message-frame (%repeated-message (char-code #\.) 3)))
           (probe (%message-frame (%repeated-message code 3))))
       (with-soft-assertions
@@ -565,12 +450,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
                 :to-be-truthy))))
 
   (it "passes ordinary characters through untouched: over-sanitizing is a defect too"
-    ;; A sanitizer that crushed everything would satisfy every spec above, so
-    ;; the same frame has to be checked from the other side. #x21 is the first
-    ;; code point clear of C0, #x7E sits immediately below DEL and #xA0
-    ;; immediately above C1's top -- the three places an off-by-one in the
-    ;; ranges would show up -- and the last three are multibyte characters well
-    ;; clear of every range, including a wide (double-width) one.
     (let* ((codes (list #x21 #x41 #x7e #xa0 #xe9 #x3bb #x3042))
            (frame (%message-frame (coerce (mapcar #'code-char codes) 'string)
                                   :width 15)))
@@ -579,13 +458,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
               do (expect (find (code-char code) frame) :to-be-truthy)))))
 
   (it "draws a space message as a styled region rather than dropping it"
-    ;; #\Space is both the code point immediately above C0 and the character
-    ;; the substitution produces, so a passed-through space and an
-    ;; over-sanitized one are the same byte; #x21 above carries the
-    ;; discriminating duty for that boundary. What is observable here is that
-    ;; a space message is drawn at all -- its cells take the message style, so
-    ;; the frame differs from one with no message -- and that drawing it adds
-    ;; no control byte of its own.
     (let ((spaces (%message-frame "   "))
           (none (%message-frame nil)))
       (with-soft-assertions
@@ -594,13 +466,6 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
                 :to-be-truthy))))
 
   (it "holds for RUN-STATE-RENDER, the path --message actually travels"
-    ;; The specs above call MATRIX-DRAW-MESSAGE directly. This one goes through
-    ;; RUN-STATE-MESSAGE, where the --message option's string is stored and
-    ;; from which every real frame is drawn, so the invariant is pinned on the
-    ;; shipped path and not only on the function under it. The matrix is
-    ;; deliberately left unadvanced, so every cell outside the message is blank
-    ;; and the frame's control bytes are the renderer's framing plus whatever
-    ;; the message contributed.
     (let ((probe (run-state-render (%message-run-state (%repeated-message #x1b 3))))
           (baseline (run-state-render (%message-run-state "..."))))
       (with-soft-assertions
@@ -613,25 +478,9 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
 
 (describe "%lambda-glyph"
   (it "is upstream's own U+03BB, pinned by code point rather than by identity"
-    ;; The -m draw specs above compare against %EXPECTED-LAMBDA, so they pin
-    ;; the renderer to a fixed character; this pins which character upstream
-    ;; chose. Together they are what stops -m from drawing, say, #\A -- a
-    ;; substitution the shape assertions alone would not notice, since 65 is
-    ;; odd just as 955 is.
     (expect (= (char-code (cl-cmatrix::%lambda-glyph)) #x3bb) :to-be-truthy)))
 
 (describe "%random-bold-cell-p"
-  ;; Literal expected values, computed once from ODDP(3X + 5ROW + TICK) and
-  ;; written out rather than restated as the implementation's own expression,
-  ;; which would only ever agree with itself.
-  ;;
-  ;; What this table can and cannot pin down is worth stating, because the
-  ;; predicate reduces its inputs modulo 2: only the PARITY of each weight is
-  ;; observable, so 3 and 7 name the same function here and no test written
-  ;; against this contract can separate them. What the rows below do fix is
-  ;; that both weights stay odd, that each applies to the argument it applies
-  ;; to now, and that the tick enters with weight 1 -- every change that
-  ;; alters an outcome for some input.
   (it-each ((0 0 0 nil) (1 0 0 t) (0 1 0 t) (0 0 1 t) (1 1 0 nil)
             (2 0 0 nil) (0 2 0 nil) (2 1 0 t) (1 2 0 t)
             (2 2 0 nil) (2 2 1 t) (3 2 1 nil) (1 0 1 nil))

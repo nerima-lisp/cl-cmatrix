@@ -1,10 +1,3 @@
-;;;; t/registry-test.lisp
-;;;;
-;;;; DEFINE-REGISTRY-QUERIES itself, exercised against a throwaway registry.
-;;;; +COLOR-SCHEMES+/+CHARSETS+' own LIST-*/*-P functions are already covered
-;;;; end-to-end by color-scheme-test.lisp and glyphs-test.lisp; this file
-;;;; pins down the macro's own contract -- enumeration order and membership
-;;;; -- independent of either real registry.
 
 (in-package #:cl-cmatrix/test)
 

@@ -18,7 +18,7 @@ LENGTH no shorter than the floor every spawn and every reflow keeps it above."
 
 (defun %valid-matrix-state-p (state)
   "True when STATE is internally consistent. The column count is
-(MATRIX-STATE-COLUMN-COUNT WIDTH) and deliberately not WIDTH: upstream scans
+(MATRIX-STATE-COLUMN-COUNT WIDTH), not WIDTH: upstream scans
 `for (j = 0; j <= COLS - 1; j += 2)`, so we hold one COLUMN per animated
 screen column and draw column I at screen x = 2I (src/state.lisp:10-14)."
   (and (typep state 'cl-cmatrix::matrix-state)

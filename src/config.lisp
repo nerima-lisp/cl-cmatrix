@@ -1,4 +1,3 @@
-;;;; src/config.lisp
 
 (in-package #:cl-cmatrix)
 

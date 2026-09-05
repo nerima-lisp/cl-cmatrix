@@ -1,8 +1,3 @@
-;;;; src/conditions.lisp
-;;;;
-;;;; A single package-specific base condition, with every condition
-;;;; CL-CMATRIX signals deriving from it, so a caller can catch every failure
-;;;; this library raises with one HANDLER-CASE clause on CL-CMATRIX-ERROR.
 
 (in-package #:cl-cmatrix)
 

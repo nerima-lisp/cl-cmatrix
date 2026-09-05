@@ -1,19 +1,3 @@
-;;;; t/cli-test.lisp
-;;;;
-;;;; Flag parsing, plus the handler's own wiring. RUN-MATRIX takes over a real
-;;;; terminal, so no case here ever reaches it: RUN-APP is called only with
-;;;; --help or --version, and the %CMATRIX-HANDLER cases pass their own
-;;;; recorder as :RUN-MATRIX-FN, the defaulted-keyword seam that exists so the
-;;;; handler can be executed without the animation starting -- the same shape
-;;;; t/run-state-test.lisp uses for :TERMINAL-SIZE-FN.
-;;;; The IT-ISOLATED cases at the bottom exercise MAIN and
-;;;; IMAGE-ENTRY-POINT for real, in a subprocess, for the same reason they
-;;;; are never called directly above: both end in HOST-KIT:QUIT, a genuine
-;;;; process exit that would kill this test runner if called in-process.
-;;;; SB-COVER's coverage data is per-process, so this subprocess's execution
-;;;; is invisible to CL-WEAVE:COVERAGE-STATISTICS in the parent regardless --
-;;;; these are here for their value as real execution tests, not for
-;;;; coverage percentage (see scripts/coverage-entry.lisp's header comment).
 
 (in-package #:cl-cmatrix/test)
 
@@ -55,12 +39,8 @@ time."
                      :to-be-truthy))))))
 
 (define-option-round-trip :old-style nil ("-o") t)
-;; -c is upstream's classic-CJK flag and -m is upstream's lambda render mode.
-;; Both are plain flags now; neither is a --charset value.
 (define-option-round-trip :japanese nil ("-c") t)
 (define-option-round-trip :lambda nil ("-m") t)
-;; --charset offers exactly ascii/classic/katakana/binary. "lambda" was a
-;; choice here once and is not one now, which is what the REJECTS arm pins.
 (define-option-round-trip :charset "ascii" ("-g" "binary") "binary" ("-g" "lambda"))
 
 (describe "%cmatrix-run-matrix-args"
@@ -123,10 +103,6 @@ time."
         (expect (null (getf args :fps)) :to-be-truthy)
         (expect (= (getf args :update-delay) 6) :to-be-truthy))))
 
-  ;; cl-cli's OPTION-VALUE-SOURCE returns NIL, not :DEFAULT, for an absent
-  ;; option that carries no literal default -- which --fps does not. The
-  ;; resolution therefore compares against :COMMAND-LINE explicitly, and this
-  ;; case is what stops that comparison from silently becoming (NOT NULL).
   (it "lets an explicit --fps suppress -u, and leaves -u in force otherwise"
     (let ((fps-args (run-matrix-args '("--fps" "60" "-u" "6")))
           (delay-args (run-matrix-args '("-u" "6"))))
@@ -136,11 +112,6 @@ time."
         (expect (null (getf delay-args :fps)) :to-be-truthy)
         (expect (= (getf delay-args :update-delay) 6) :to-be-truthy))))
 
-  ;; -u is upstream's delay and a LARGER value is SLOWER; --speed is ours and
-  ;; divides that delay, so a LARGER value is FASTER. The two knobs point
-  ;; opposite ways, and nothing but this case pins the direction of either.
-  ;; Every expected tick count below is a literal, never recomputed from the
-  ;; CLI's own output, so an inverted resolution cannot agree with itself.
   (it "points -u and --speed in opposite directions through the tick resolution"
     (flet ((ticks (tokens)
              (let ((args (run-matrix-args tokens)))
@@ -165,9 +136,6 @@ time."
                (expect (not (eq (getf args :glyphs) +katakana-glyphs+)) :to-be-truthy)
                (expect (not (getf args :lambda-p)) :to-be-truthy))))
 
-  ;; Half-width katakana used to ride on -c under a --katakana alias. It does
-  ;; not any more: it is reachable only through --charset, and --katakana is
-  ;; now an unknown option rather than a second spelling of -c.
   (it "reaches half-width katakana only through --charset, never through -c"
     (with-soft-assertions
       (expect (eq (getf (run-matrix-args '("-g" "katakana")) :glyphs) +katakana-glyphs+)
@@ -196,10 +164,6 @@ time."
                (expect (getf args :lambda-p) :to-be-truthy)
                (expect (eq (getf args :glyphs) +default-glyphs+) :to-be-truthy))))
 
-  ;; IT-EACH quotes its case data, so EXPECTED arrives as the constant's name
-  ;; and SYMBOL-VALUE reads it. Naming the +...-GLYPHS+ constant keeps the
-  ;; oracle anchored there rather than routing it back through the same
-  ;; CHARSET-GLYPHS registry the resolution under test already consulted.
   (it-each ((("-g" "binary") +binary-glyphs+)
             (("-g" "katakana") +katakana-glyphs+)
             (("-c") +classic-glyphs+))
@@ -224,9 +188,6 @@ time."
                (expect (eq (getf (run-matrix-args (list "--charset" name)) :glyphs) glyphs)
                        :to-be-truthy))))
 
-  ;; "lambda" was a --charset choice before -m became a render mode. Keeping
-  ;; it rejected is the only thing that stops the old spelling from quietly
-  ;; coming back as a fifth glyph set.
   (it-each (("lambda") ("japanese") ("cjk") (""))
            "rejects ~S, which names no registered charset"
            (name)
@@ -286,9 +247,6 @@ thread ends up doing the work."
       (values seen-args seen-term code))))
 
 (describe "%cmatrix-handler: what actually reaches RUN-MATRIX"
-  ;; %CMATRIX-RUN-MATRIX-ARGS' own cases above prove the plist is built
-  ;; correctly and t/runtime-test.lisp proves RUN-MATRIX validates what it is
-  ;; given; neither shows the one plist arriving at the other function.
   (it "applies RUN-MATRIX to the plist %CMATRIX-RUN-MATRIX-ARGS resolved"
     (multiple-value-bind (args term code)
         (record-handler-call '("--speed" "2.5" "-C" "cyan" "-g" "katakana" "-u" "6"
@@ -307,11 +265,6 @@ thread ends up doing the work."
         (expect (typep (getf args :random-state) 'random-state) :to-be-truthy)
         (expect (eql code 0) :to-be-truthy))))
 
-  ;; RUN-MATRIX has no :FORCE-LINUX-TERM parameter, so a plist that still
-  ;; carries the key is a live crash in the delivered binary and not merely
-  ;; untidy. The default argument to GETF is what makes the check exact: a
-  ;; plain (GETF ARGS :FORCE-LINUX-TERM) cannot tell an absent key from a
-  ;; present NIL one.
   (it "strips :FORCE-LINUX-TERM and runs the call under TERM=linux for -f"
     (multiple-value-bind (args term code) (record-handler-call '("-f"))
       (with-soft-assertions
@@ -319,10 +272,6 @@ thread ends up doing the work."
         (expect (equal term "linux") :to-be-truthy)
         (expect (eql code 0) :to-be-truthy))))
 
-  ;; The other arm of the same branch: without -f the handler must not enter
-  ;; WITH-ENVIRONMENT-VARIABLES at all. Comparing against the ambient TERM
-  ;; rather than against "not linux" keeps this honest on a host whose TERM
-  ;; really is linux.
   (it "leaves TERM alone when -f is absent, and still strips the key"
     (multiple-value-bind (args term code) (record-handler-call '())
       (with-soft-assertions
@@ -330,9 +279,6 @@ thread ends up doing the work."
         (expect (equal term (sb-ext:posix-getenv "TERM")) :to-be-truthy)
         (expect (eql code 0) :to-be-truthy))))
 
-  ;; :TTY is likewise not a RUN-MATRIX parameter. It is removed on the way
-  ;; into %CMATRIX-RUN-WITH-TERMINAL, which means it has to be gone on the
-  ;; no-tty arm too -- the arm every ordinary invocation takes.
   (it "strips :TTY even on the branch where no --tty was given"
     (multiple-value-bind (args term code) (record-handler-call '())
       (declare (ignore term))
@@ -342,18 +288,6 @@ thread ends up doing the work."
         (expect (eql code 0) :to-be-truthy)))))
 
 (describe "--tty: only a terminal is a terminal"
-  ;; Handing --tty a regular file used to open it and hand RUN-MATRIX its
-  ;; descriptor, which wrote the animation into the file from byte zero. The
-  ;; rejection has to land before the descriptor is taken, so this checks that
-  ;; RUN-MATRIX was never reached.
-  ;;
-  ;; The surviving-file rows are not decoration. WITH-OPEN-FILE closes with
-  ;; :ABORT T on a non-local exit, and an aborted close of a :DIRECTION :IO
-  ;; stream deletes the file -- so a rejection signalled from inside that
-  ;; macro erases the very file the user misnamed. Both rows failed against
-  ;; exactly that arrangement before %CMATRIX-RUN-WITH-TERMINAL switched to
-  ;; OPEN plus an explicit CLOSE, which is why they are here and why the
-  ;; teardown deletes conditionally rather than assuming.
   (it "refuses a --tty naming a regular file, before RUN-MATRIX is reached"
     (let ((path (format nil "/tmp/cl-cmatrix-cli-test-~D-~D.tty"
                         (sb-unix:unix-getpid) (random 1000000)))

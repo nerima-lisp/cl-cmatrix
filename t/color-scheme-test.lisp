@@ -1,4 +1,3 @@
-;;;; t/color-scheme-test.lisp
 
 (in-package #:cl-cmatrix/test)
 

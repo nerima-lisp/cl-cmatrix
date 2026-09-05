@@ -1,59 +1,9 @@
-;;;; t/docs-test.lisp
-;;;;
-;;;; Documentation-to-implementation consistency. docs/src/ names symbols and
-;;;; command-line options in prose; nothing but a reader's attention normally
-;;;; stops that prose from drifting away from src/. These specs read the
-;;;; markdown live on every run -- never a copy checked in here -- and assert
-;;;; that every name the docs claim as public really is exported, and every
-;;;; option spelling the docs show in a working command really is accepted.
-;;;;
-;;;; WHAT MAKES THIS HARD. A backticked span in these documents is not a symbol
-;;;; name. It is just as likely to be `nix flake check`, `flake.nix`, a runtime
-;;;; key like `q`, an upstream C fragment like `rand() % 90 + 33`, an
-;;;; environment variable, or -- worst of all -- an option this project
-;;;; deliberately does NOT have: docs/src/reference/compatibility.md documents
-;;;; `-l` and `-x` as permanent non-goals, `--katakana` as removed, and
-;;;; `--charset lambda` as rejected, all in backticks. Any rule that treats
-;;;; every backticked token as an API claim reports those as defects.
-;;;;
-;;;; So the extraction rules below are keyed on the CONTEXT that makes a token
-;;;; a claim, not on the token's own shape:
-;;;;
-;;;;   1. `cl-cmatrix:NAME` / `cl-cmatrix/cli:NAME` -- a single-colon package
-;;;;      qualifier IS the claim that NAME is external. The double-colon form
-;;;;      is skipped, because api.md documents those two colons as the way to
-;;;;      reach an internal symbol.
-;;;;   2. A heading whose entire text is one code span, and a same-page anchor
-;;;;      link `[`name`](#name)` -- both say "this document documents NAME".
-;;;;   3. An option token inside a `cl-cmatrix ...` invocation, and an option
-;;;;      token in a table cell that is nothing but a comma-separated list of
-;;;;      option spans -- both say "this spelling works". `--opt=value` is one
-;;;;      of those spellings: CL-CLI splits a long token on its first #\= and
-;;;;      resolves only the left side, so the name is what gets checked.
-;;;;
-;;;; Everything else is ignored on purpose. That conservatism is what a rule
-;;;; keyed on shape alone cannot buy, and it is also what makes the
-;;;; non-vacuity specs in the first DESCRIBE mandatory rather than decorative:
-;;;; a rule this selective fails silently by matching nothing, and a broken
-;;;; docs path or a docs/ tree missing from the build's source closure would
-;;;; leave every remaining spec passing over an empty corpus.
-;;;;
-;;;; NOT CHECKED, deliberately: the reverse direction. An exported symbol that
-;;;; no document mentions is not a defect here -- requiring every export to be
-;;;; documented would be a different, stricter policy, and requiring every
-;;;; internal function to stay out of the docs would forbid architecture.md
-;;;; from explaining the implementation at all.
 
 (in-package #:cl-cmatrix/test)
 
-;;; -------------------------------------------------------------------------
-;;; Reading the corpus
 
 (defun %docs-directory ()
-  "The documentation source tree, resolved through ASDF rather than through
-*DEFAULT-PATHNAME-DEFAULTS* so the specs read the same files whether they run
-from a checkout, from `nix run .#test`, or from an installed system. Same
-mechanism t/mutation-test.lisp uses to read src/ live."
+  "Return the documentation source tree resolved through ASDF."
   (asdf:system-relative-pathname "cl-cmatrix" "docs/src/"))
 
 (defun %docs-pathnames ()
@@ -65,18 +15,13 @@ mechanism t/mutation-test.lisp uses to read src/ live."
         #'string< :key #'namestring))
 
 (defun %docs-read-file (pathname)
-  "PATHNAME's entire contents as a string. UTF-8 is named explicitly because
-getting-started.md quotes CJK glyphs, and a reader defaulting to Latin-1 would
-turn them into mojibake rather than fail."
+  "Read PATHNAME as UTF-8 text."
   (with-open-file (stream pathname :external-format :utf-8)
     (let ((text (make-string (file-length stream))))
       (subseq text 0 (read-sequence text stream)))))
 
 (defvar *docs-corpus* nil
-  "Memoized (RELATIVE-NAME TEXT) entries, filled on first use. Only a
-non-empty result is cached, so a run that finds no documentation retries
-rather than freezing the empty answer that would make every later spec pass
-vacuously.")
+  "Memoized (RELATIVE-NAME TEXT) entries.")
 
 (defun %docs-corpus ()
   "The documentation corpus as (RELATIVE-NAME TEXT) entries."
@@ -87,9 +32,6 @@ vacuously.")
                             (%docs-read-file pathname)))
                     (%docs-pathnames)))))
 
-;;; -------------------------------------------------------------------------
-;;; String utilities. Plain CL: cl-cmatrix has no regular-expression
-;;; dependency, and cl-cmatrix.asd records that omission as deliberate.
 
 (defun %docs-trim (string)
   (string-trim '(#\Space #\Tab #\Return) string))
@@ -134,8 +76,6 @@ vacuously.")
                (= 2 (count #\` string)))
       (subseq string 1 (1- length)))))
 
-;;; -------------------------------------------------------------------------
-;;; Rule 1: package-qualified references
 
 (defun %docs-symbol-character-p (character)
   "True for a character that can appear in a Lisp symbol name as these
@@ -154,13 +94,8 @@ into one."
     (subseq text index end)))
 
 (defun %docs-qualified-references (text)
-  "Every (NAME PACKAGE-NAME) TEXT writes as cl-cmatrix:NAME or
-cl-cmatrix/cli:NAME.
-
-The double-colon form is skipped rather than checked. api.md documents
-`cl-cmatrix::` as precisely the spelling that reaches something unsupported,
-so a name written that way is a claim that the symbol is INTERNAL -- asserting
-it were external would invert the documented meaning."
+  "Return public qualified references in TEXT. Double-colon references are
+skipped because they name internal symbols."
   (let ((references '())
         (root "cl-cmatrix")
         (start 0))
@@ -178,25 +113,15 @@ it were external would invert the documented meaning."
                      (push (list name package-name) references))))))
     (nreverse references)))
 
-;;; -------------------------------------------------------------------------
-;;; Rule 2: headings and same-page anchor links
 
 (defun %docs-heading-name (line)
-  "LINE's code span when LINE is an ATX heading whose whole text is one span.
-
-`## Why \\`matrix-state\\` and \\`run-state\\` are separate structs` is not one
-span and is therefore not a claim that either name is public -- which is the
-right answer, since both are internal."
+  "Return LINE's code span when it is an ATX heading containing one span."
   (let ((trimmed (%docs-trim line)))
     (when (and (plusp (length trimmed)) (char= (char trimmed 0) #\#))
       (%docs-sole-span (%docs-trim (string-left-trim "#" trimmed))))))
 
 (defun %docs-anchor-link-names (line)
-  "Every NAME LINE writes as [`NAME`](#anchor).
-
-The #-anchor is required: [`--charset katakana`](../getting-started.md#...) in
-compatibility.md points at another page's section rather than at a symbol
-documented here, and is not a claim about a symbol at all."
+  "Return names in LINE's same-page code-span links."
   (let ((names '())
         (start 0))
     (loop for open = (search "[`" line :start2 start)
@@ -209,12 +134,7 @@ documented here, and is not a claim about a symbol at all."
     (nreverse names)))
 
 (defun %docs-api-name-shape-p (name)
-  "True when NAME is spelled like a Lisp symbol and like nothing else:
-lowercase letters, digits, and - + * only, opening with a lowercase letter or
-a #\\+. This is the second gate behind the context rules, and it is what keeps
-`nix flake check` (spaces), `flake.nix` (a dot), `~/common-lisp/` (a slash),
-`$out` and `--charset` (a leading punctuation character) out of the candidate
-set even if one of them ever became a heading."
+  "True when NAME has the lowercase Lisp symbol shape accepted by docs checks."
   (flet ((lowercase-letter-p (character)
            (and (alpha-char-p character) (lower-case-p character))))
     (and (plusp (length name))
@@ -225,40 +145,17 @@ set even if one of them ever became a heading."
                       (find character "-+*")))
                 name))))
 
-;;; -------------------------------------------------------------------------
-;;; Rule 3: command-line option spellings
 
 (defun %docs-option-token-name (token)
-  "TOKEN reduced to the part CL-CLI would look an option up by: everything
-before the first #\\= in a --long token, or TOKEN unchanged.
-
-This mirrors CL-CLI's own PARSE-LONG-OPTION-TOKEN, which splits a long token
-on its first #\\= and canonicalises only the left half, so `--charset=binary'
-and `--charset binary' reach the same option -- measured against CL-CLI 1.3.0,
-both parse to :CHARSET \"binary\", and `--bogus=1' is rejected as the unknown
-option `--bogus'.
-
-The split is deliberately restricted to the long form. CL-CLI performs no such
-split on a short cluster: `-g=binary' reaches --charset carrying the literal
-value \"=binary\", which its :CHOICES then rejects. Treating `-g=binary' as a
-spelling of -g here would therefore endorse an invocation that does not work."
+  "Return the option name before #\\= for a long option; leave other tokens
+unchanged."
   (if (%docs-prefix-at-p token 0 "--")
       (let ((equals (position #\= token)))
         (if equals (subseq token 0 equals) token))
       token))
 
 (defun %docs-option-token-p (token)
-  "True when TOKEN is an option spelling: --long-name, --long-name=value, or
--x for one letter.
-
-The attached-value form has to be admitted rather than merely tolerated. It is
-a spelling CL-CLI accepts, so a document showing `--bogus=1' is claiming an
-option that does not exist; excluding the form would let exactly that claim
-through unchecked, because a token this rule rejects is never looked up at all.
-
-Only the name half is shape-checked. What follows the #\\= is a value -- a
-path, a message, a number -- and constraining it would put this rule back in
-the business of judging values, which is the parser's job and not this file's."
+  "True when TOKEN has a supported long or short option shape."
   (let* ((name (%docs-option-token-name token))
          (length (length name)))
     (cond ((and (> length 2) (string= "--" name :end2 2))
@@ -298,8 +195,6 @@ of the same table -- carries prose and is excluded."
           (return nil))
         (push span tokens)))))
 
-;;; -------------------------------------------------------------------------
-;;; Candidate sets
 
 (defun %docs-collect (extractor)
   "Apply EXTRACTOR to each corpus entry's text and tag every result with the
@@ -350,8 +245,6 @@ anchor link, filtered to symbol-shaped names."
                       (dolist (token (%docs-table-cell-tokens cell))
                         (push token tokens))))))))))))
 
-;;; -------------------------------------------------------------------------
-;;; Oracles, both read from the implementation rather than restated here
 
 (defun %docs-external-symbol-p (name package-names)
   "True when NAME is an EXTERNAL symbol of one of PACKAGE-NAMES. FIND-SYMBOL's
@@ -394,13 +287,8 @@ which document and which name rather than only how many."
   (mapcar (lambda (entry) (format nil "~A: ~A" (first entry) (second entry)))
           entries))
 
-;;; -------------------------------------------------------------------------
 
 (describe "docs/src: the corpus these checks read"
-  ;; Every spec below this DESCRIBE passes over an empty corpus. These four
-  ;; are what make the green meaningful: a docs/ tree missing from the build's
-  ;; source closure, a renamed directory, or an extraction rule that stopped
-  ;; matching all fail here rather than quietly reporting nothing to check.
   (it "finds markdown files under docs/src"
     (expect (plusp (length (%docs-corpus))) :to-be-truthy))
 
@@ -424,13 +312,6 @@ which document and which name rather than only how many."
     (expect (plusp (length (%docs-option-candidates))) :to-be-truthy)))
 
 (describe "docs/src: the attached-value option rule, driven directly"
-  ;; No document currently spells an option as `--opt=value' -- `rg --
-  ;; "--[a-zA-Z0-9-]+=" docs/src/' matches nothing -- so the corpus cannot
-  ;; reach that branch of the rule, and the specs above would stay green with
-  ;; it removed entirely. That is precisely the shape of a check nobody
-  ;; notices has died. These specs drive the branch with literal text instead,
-  ;; so it is exercised on every run whether or not a document adopts the
-  ;; spelling, and it goes red the moment it stops working.
   (it "extracts an attached-value spelling from an invocation"
     (expect (%docs-invocation-tokens "cl-cmatrix --charset=binary")
             :to-equal '("--charset=binary")))
@@ -443,12 +324,6 @@ which document and which name rather than only how many."
               :to-be-truthy)))
 
   (it "rejects an attached spelling of an option that does not exist"
-    ;; The reason the form is admitted at all. A document writing
-    ;; `cl-cmatrix --bogus=1' has to fail the existence check, and both halves
-    ;; are asserted because either one quietly returning nothing would let the
-    ;; claim through: an unextracted token is never looked up, and a token
-    ;; carrying its value into the lookup would match nothing for the wrong
-    ;; reason.
     (with-soft-assertions
       (expect (%docs-invocation-tokens "cl-cmatrix --bogus=1")
               :to-equal '("--bogus=1"))
@@ -458,9 +333,6 @@ which document and which name rather than only how many."
               :to-be-falsy)))
 
   (it "still ignores an attached spelling merely mentioned in prose"
-    ;; The exact composition %DOCS-OPTION-CANDIDATES applies to an unfenced
-    ;; line. Admitting `--opt=value' must not cost the conservatism that keeps
-    ;; a discussion of an option out of the claim set.
     (let ((line "Both `--charset=binary` and `--charset binary` select binary."))
       (expect (loop for span in (%docs-code-spans line)
                     append (%docs-invocation-tokens span))
@@ -474,10 +346,6 @@ which document and which name rather than only how many."
               :to-equal '())))
 
   (it "does not treat -g=binary as a spelling of -g"
-    ;; Measured against CL-CLI 1.3.0: a short cluster is not split on #\=, so
-    ;; `-g=binary' reaches --charset carrying the literal value "=binary" and
-    ;; is rejected by its :CHOICES. Accepting it here would endorse an
-    ;; invocation that does not run.
     (expect (%docs-option-token-p "-g=binary") :to-be-falsy)))
 
 (describe "docs/src: every symbol the docs present as public is exported"
@@ -489,9 +357,6 @@ which document and which name rather than only how many."
             :to-equal '()))
 
   (it "every name given its own heading or same-page anchor link is external"
-    ;; Either package: api.md and conditions.md document CL-CMATRIX, while
-    ;; architecture.md and development.md name the CLI package's entry points.
-    ;; A name external in neither is documented as public but is not.
     (expect (%docs-report
              (loop for (label name) in (%docs-api-name-candidates)
                    unless (%docs-external-symbol-p name '("CL-CMATRIX" "CL-CMATRIX/CLI"))
@@ -509,10 +374,6 @@ which document and which name rather than only how many."
               :to-equal '())))
 
   (it "the accepted set is the implementation's own, not a list restated here"
-    ;; Guards the oracle rather than the docs: if MAKE-CMATRIX-OPTIONS ever
-    ;; returns nothing, or CL-CLI's accessors stop returning names, the spec
-    ;; above starts accepting nothing and would report every documented option
-    ;; as missing -- or, with an empty candidate set, nothing at all.
     (with-soft-assertions
       (expect (plusp (length (%docs-recognized-option-names))) :to-be-truthy)
       (expect (member "charset" (%docs-recognized-option-names) :test #'string=)

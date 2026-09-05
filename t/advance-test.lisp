@@ -1,15 +1,3 @@
-;;;; t/advance-test.lisp
-;;;;
-;;;; The determinism guarantee this project is built around: a MATRIX-STATE
-;;;; seeded from a fixed RANDOM-STATE produces byte-identical output, tick
-;;;; for tick, on every run.
-;;;;
-;;;; Timing is upstream cmatrix's, not a per-column tick interval: ASYNC-COUNT
-;;;; cycles 1..+ASYNC-COUNT-CYCLE+ and a column advances only on a frame where
-;;;; that count exceeds its own UPDATE threshold. A column whose threshold is
-;;;; not met is carried over as the very same object and draws no randomness,
-;;;; so the gate is checked here both by object identity and by the position
-;;;; of the state's random stream.
 
 (in-package #:cl-cmatrix/test)
 
@@ -57,11 +45,6 @@ the randomness)"
 
   (it "old-style mode is reproducible too, and is the only mode that plants upstream's
 :HEAD-MARKER and :PIPE sentinels"
-    ;; The two modes share one COLUMN structure, so "old style ran" cannot be
-    ;; read off the shape of the data. What distinguishes it is the cell
-    ;; vocabulary: upstream's 0 and 1 sentinels exist only in the old-style
-    ;; scan, so finding them under -o and never without it is what proves
-    ;; OLD-STYLE-P reached the column functions rather than being ignored.
     (flet ((sentinel-p (state)
              (some (lambda (column) (or (find :head-marker (column-cells column))
                                         (find :pipe (column-cells column))))
@@ -84,11 +67,6 @@ the randomness)"
                 :to-be-truthy))))
 
   (it "carries every column over untouched on the first tick, and none of them with -a off"
-    ;; An exact invariant rather than a statistical one, so it needs no
-    ;; particular seed: ASYNC-COUNT is 1 on the first advance and %SPAWN-COLUMN
-    ;; draws every UPDATE threshold from 1..+MAX-UPDATE-THRESHOLD+, so
-    ;; `count > update` is false for every column. With ASYNCP false the gate
-    ;; is bypassed and every column is rebuilt.
     (let* ((state (make-matrix-state 8 4 :random-state (sb-ext:seed-random-state 9)))
            (async (matrix-advance state))
            (synchronous (matrix-advance
@@ -105,11 +83,6 @@ the randomness)"
                 :to-be-truthy))))
 
   (it "draws no randomness at all for the columns its async gate holds back"
-    ;; Measured, not assumed: from seed 9 at 8x4 the first randomness a column
-    ;; consumes is the glyph its spawn plants once SPACES has counted down, and
-    ;; with -a on no column has reached that frame after four ticks while with
-    ;; -a off one has. Both arms run the same four ticks from the same seed, so
-    ;; the only difference is the gate.
     (let ((base (make-matrix-state 8 4 :random-state (sb-ext:seed-random-state 9))))
       (with-soft-assertions
         (expect (= (%random-position (%run-ticks 8 4 4 :seed 9))
@@ -132,11 +105,6 @@ the randomness)"
         (expect (= (matrix-state-tick state) 0) :to-be-truthy))))
 
   (it "keeps a column's trail bounded: some cell stays blank on every frame of a long run"
-    ;; What the old "respawns once the trail has scrolled past" case pinned,
-    ;; restated for a model with no falling head to watch. A stream that never
-    ;; gave its top row back would fill the buffer and stay filled, so a blank
-    ;; cell on every single frame is the bound; seeing internal row 1 (screen
-    ;; row 0) both lit and blank across the run is the recycling.
     (let ((state (make-matrix-state 1 6 :random-state (sb-ext:seed-random-state 3)))
           (always-blank-somewhere t)
           (saw-character nil)
@@ -175,9 +143,6 @@ the randomness)"
 
 (describe "%spawn-column"
   (it "plants upstream's :SPACE sentinel at internal row 1 and leaves every other cell :EMPTY"
-    ;; :EMPTY and :SPACE are distinct on purpose (src/column.lisp:16-22): the
-    ;; spawn test is literally `cells[0] == :EMPTY and cells[1] == :SPACE`, so
-    ;; a column that started all-:EMPTY would never spawn at all.
     (let ((column (cl-cmatrix::%spawn-column +default-glyphs+
                                              (sb-ext:seed-random-state 7) 8)))
       (with-soft-assertions
@@ -218,11 +183,6 @@ the randomness)"
 
 (describe "%advance-old-style-column"
   (it "shifts every visible row down one and carries each head bit with its cell"
-    ;; Upstream never assigns is_head in old style at all, so the head bits
-    ;; riding along with their cells is our deliberate divergence
-    ;; (src/column.lisp:172-177) and needs pinning. Internal row HEIGHT is
-    ;; outside old style's visible range and is left alone, which is why #\c
-    ;; survives at the end.
     (let* ((column (cl-cmatrix::%make-column :cells (vector :empty #\a #\b :space #\c)
                                              :heads (copy-seq #*01001)
                                              :length 3 :spaces 1 :update 2))
@@ -236,7 +196,6 @@ the randomness)"
         (expect (= (column-spaces advanced) 0) :to-be-truthy)
         (expect (= (column-length advanced) 3) :to-be-truthy)
         (expect (= (column-update advanced) 2) :to-be-truthy)
-        ;; Functional, as the whole engine is: the argument is untouched.
         (expect (equal (coerce (column-cells column) 'list)
                        '(:empty #\a #\b :space #\c))
                 :to-be-truthy))))
@@ -250,12 +209,9 @@ the randomness)"
                       :change-glyphs-p t))
            (cells (column-cells advanced)))
       (with-soft-assertions
-        ;; Same shift as above -- repainting must not move anything.
         (expect (eq (svref cells 0) :space) :to-be-truthy)
         (expect (eq (svref cells 1) :empty) :to-be-truthy)
         (expect (equal (coerce (column-heads advanced) 'list) '(0 0 1 0 1)) :to-be-truthy)
-        ;; #\a #\b #\c are not in the glyph set, so finding X or Y in all three
-        ;; positions is proof the repaint ran rather than a coincidence.
         (expect (every (lambda (row) (member (svref cells row) '(#\X #\Y))) '(2 3 4))
                 :to-be-truthy))))
 
@@ -283,9 +239,6 @@ the randomness)"
 
 (describe "%advance-matrix-column"
   (it "dispatches on the requested mode, not on the shape of the column"
-    ;; Both modes share one COLUMN structure, so the only thing that can pick
-    ;; between them is OLD-STYLE-P. Same column, same seed, same height: the
-    ;; dispatcher must reproduce each mode's own result exactly.
     (let ((column (cl-cmatrix::%spawn-column (%xy-glyphs) (sb-ext:seed-random-state 11) 6)))
       (flet ((cells (c) (coerce (column-cells c) 'list)))
         (with-soft-assertions
@@ -303,9 +256,6 @@ the randomness)"
 
 (describe "%column-with-glyphs"
   (it "redraws every character cell while preserving heads, length, spaces and update"
-    ;; A runtime charset toggle must change what the animation shows without
-    ;; resetting where it is, so the keyword cells and all three timing fields
-    ;; have to survive untouched.
     (let* ((column (cl-cmatrix::%make-column :cells (vector :empty #\a :space #\c)
                                              :heads (copy-seq #*0101)
                                              :length 5 :spaces 4 :update 3))
@@ -333,8 +283,6 @@ the randomness)"
       (with-soft-assertions
         (expect (equal (coerce (column-cells short) 'list) '(:empty #\a :space)) :to-be-truthy)
         (expect (equal (coerce (column-heads short) 'list) '(0 1 0)) :to-be-truthy)
-        ;; LENGTH clamps to the new height but never below +MIN-TRAIL-LENGTH+,
-        ;; or a stream taller than the screen would never finish growing.
         (expect (= (column-length short) +min-trail-length+) :to-be-truthy)
         (expect (= (column-spaces short) 2) :to-be-truthy)
         (expect (= (column-update short) 3) :to-be-truthy))))
@@ -352,11 +300,6 @@ the randomness)"
 
 (describe "column buffer invariants"
   (it "CELLS and HEADS stay parallel at HEIGHT+1 entries through every transition"
-    ;; The old suite pinned that a column's glyph vector and its bold-metadata
-    ;; vector were kept in step. There is no second metadata vector any more --
-    ;; HEADS is that parallel buffer now -- and every constructor in
-    ;; src/column.lisp has to keep it exactly as long as CELLS, or
-    ;; COLUMN-HEAD-P would silently read a row that COLUMN-CELL-AT can reach.
     (let ((glyphs (%xy-glyphs))
           (violations 0))
       (flet ((check (column height)

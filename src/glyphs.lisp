@@ -1,25 +1,3 @@
-;;;; src/glyphs.lisp
-;;;;
-;;;; The falling-character glyph sets, and the name -> glyph-vector registry
-;;;; the CLI's --charset flag resolves through, mirroring +COLOR-SCHEMES+'
-;;;; own name -> data registry in color-scheme.lisp.
-;;;;
-;;;; Two of the four sets are upstream cmatrix's own, reproduced by code
-;;;; point rather than approximated. +DEFAULT-GLYPHS+ is upstream's default
-;;;; draw and +CLASSIC-GLYPHS+ is what its -c selects. +KATAKANA-GLYPHS+ and
-;;;; +BINARY-GLYPHS+ are extensions of ours with no upstream equivalent,
-;;;; reachable only through --charset.
-;;;;
-;;;; Half-width katakana is deliberately NOT what -c selects, however much
-;;;; more like the film it looks. Upstream's -c is the CJK Symbols and
-;;;; Punctuation block, and treating the two as the same thing is the mistake
-;;;; this file previously made -- so both sets exist here, under names that
-;;;; say which is which.
-;;;;
-;;;; There is no lambda glyph set. Upstream's -m is a render mode that
-;;;; substitutes a lambda for every non-head character at draw time, not a
-;;;; character set columns draw from; it lives on MATRIX-STATE as LAMBDA-P
-;;;; and is applied in render.lisp.
 
 (in-package #:cl-cmatrix)
 
@@ -36,8 +14,7 @@ exactly one contiguous run of code points."
 (defparameter +default-glyphs+ (%build-default-glyphs)
   "The default glyph set: U+0021 through U+007A inclusive, 90 characters,
 `!` through `z`. This is upstream cmatrix's default draw, `rand() % 90 + 33`,
-reproduced exactly -- which means it deliberately stops short of the four
-printable ASCII characters above `z`, excluding `{`, `|`, `}` and `~`.
+so it excludes `{`, `|`, `}` and `~`.
 Callers may pass any other non-empty SIMPLE-VECTOR of characters to
 MAKE-MATRIX-STATE's :GLYPHS.")
 
@@ -83,18 +60,9 @@ selects; :KATAKANA and :BINARY are ours.")
   "Return the glyph SIMPLE-VECTOR NAME names. Signals UNKNOWN-CHARSET when
 NAME is not registered in +CHARSETS+.
 
-The returned vector is the registry's own, SHARED between every caller and
-not a fresh copy: two calls with the same NAME return EQ vectors. Treat it as
-read-only. Destructively modifying it -- (SETF (AREF ...)) -- corrupts the
-charset for every later caller in the process, permanently, since nothing
-rebuilds +CHARSETS+ after load.
-
-Copying on every call was considered and rejected. The expected use is to
-hand the result straight to MAKE-MATRIX-STATE's :GLYPHS, which stores the
-vector and only ever reads it; charging that path an allocation proportional
-to the glyph set, on every call, to defend against a mutation no correct
-caller performs is the wrong trade. A caller that genuinely wants a vector it
-may modify should ask for one explicitly with COPY-SEQ."
+The returned vector is shared by every caller and must be treated as
+read-only. Two calls with the same NAME return the same vector. Use COPY-SEQ
+when a mutable copy is needed."
   (or (cdr (assoc name +charsets+))
       (error 'unknown-charset :name name)))
 

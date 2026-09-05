@@ -1,18 +1,3 @@
-;;;; src/registry.lisp
-;;;;
-;;;; DEFINE-REGISTRY-QUERIES: the two lookup functions every named registry in
-;;;; this codebase provides identically -- LIST-<name>S enumerating every
-;;;; registered key, and <name>-P testing membership. +COLOR-SCHEMES+
-;;;; (color-scheme.lisp) and +CHARSETS+ (glyphs.lisp) are both a DEFPARAMETER
-;;;; alist of (KEYWORD . VALUE) conses with exactly this pair of readers
-;;;; hand-written the same way; this macro is the single declarative
-;;;; definition form both now expand into instead. The third lookup shape --
-;;;; an actual value fetch that signals a condition when the key is
-;;;; unregistered -- stays hand-written at each call site: its name and
-;;;; visibility differ too much between registries (public CHARSET-GLYPHS
-;;;; returning the looked-up value directly, vs. private %COLOR-SCHEME-RGBS
-;;;; feeding three further DEFINE-COLOR-SCHEME-ACCESSOR-generated readers) for
-;;;; folding it in here to read as anything but a forced abstraction.
 
 (in-package #:cl-cmatrix)
 

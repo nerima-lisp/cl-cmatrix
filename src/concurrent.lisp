@@ -1,12 +1,3 @@
-;;;; src/concurrent.lisp
-;;;;
-;;;; The parallel MATRIX-ADVANCE path. It is deterministic but NOT
-;;;; stream-identical to the serial path: each chunk gets its own child
-;;;; random state (seeded in chunk order before any work is submitted), so
-;;;; worker completion order cannot affect the result. The async update gate
-;;;; is applied here exactly as %MATRIX-ADVANCE-SERIAL applies it, so both
-;;;; paths agree on WHICH columns move on a given frame even though they
-;;;; disagree on which random numbers those columns draw.
 
 (in-package #:cl-cmatrix)
 

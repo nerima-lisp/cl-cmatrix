@@ -1,30 +1,3 @@
-;;;; src/column.lisp
-;;;;
-;;;; One stream position, modelled exactly the way upstream cmatrix 2.0
-;;;; models it: not as a falling head with a trail behind it, but as a column
-;;;; of independent CELLS that a scan rewrites in place each advance. There
-;;;; is no "head row" to move; a head is wherever the scan decided to plant
-;;;; one this frame, recorded in the HEADS bit vector.
-;;;;
-;;;; CELLS has HEIGHT+1 entries. Index 0 is an OFF-SCREEN staging row -- it
-;;;; is never drawn, and exists only so the spawn test has somewhere to hold
-;;;; the "a new stream may start here" marker. Internal rows 1..HEIGHT draw
-;;;; at screen rows 0..HEIGHT-1 in new style; old style instead draws
-;;;; internal rows 0..HEIGHT-1 at screen rows 0..HEIGHT-1, which is why both
-;;;; modes share one buffer rather than needing two structures.
-;;;;
-;;;; A cell holds one of: :EMPTY (upstream -1, "nothing has ever been here"),
-;;;; :SPACE (upstream ' ', "a stream passed through and left"), :HEAD-MARKER
-;;;; (upstream 0, old style only), :PIPE (upstream 1, old style only), or a
-;;;; CHARACTER. :EMPTY and :SPACE are DISTINCT and must stay that way: the
-;;;; spawn test is literally `cells[0] == :EMPTY and cells[1] == :SPACE`, so
-;;;; collapsing them into a single "blank" would not error anywhere -- it
-;;;; would silently arm every column's spawn on the wrong frame.
-;;;;
-;;;; Every function here is functional: an advance returns a fresh COLUMN and
-;;;; never mutates its argument, and randomness always comes from the
-;;;; injected RANDOM-STATE, never *RANDOM-STATE*. The deterministic test
-;;;; suite depends on both properties.
 
 (in-package #:cl-cmatrix)
 
@@ -159,22 +132,11 @@ after the scan, so the whole column shimmers instead of only its heads."
 
 (defun %advance-old-style-column (column glyphs random-state height
                                   &key change-glyphs-p)
-  "Advance COLUMN one frame under upstream's old-style scrolling (cmatrix.c
-569-598), returning a new COLUMN. Here the whole buffer really is shifted
-down one row and only the top row is generated, so the character that decides
-the new top row is the one that just moved out of it -- upstream reads it as
-`matrix[1][j]` AFTER the shift, which is the same cell.
-
-The roll is drawn unconditionally before the branch, exactly as upstream
-does, so the random stream advances the same amount on every frame regardless
-of which branch is taken.
-
-DELIBERATE DIVERGENCE FROM UPSTREAM, and a bug fix rather than a style
-choice: upstream never assigns `is_head` anywhere in old-style mode, so its
-head-rendering branch reads whichever bytes `malloc` happened to return.
-Its own comment at the `matrix[0][j].val = 0` line -- \"whether head of next
-collumn of chars has a white 'head' on it\" -- says what was intended, so we
-set the head bit when we plant a :HEAD-MARKER and clear it otherwise."
+  "Advance COLUMN one frame under upstream's old-style scrolling, returning a
+new COLUMN. The buffer is shifted down one row and the top row is generated
+from the cell that moved out of it. The roll is drawn before the branch so the
+random stream advances consistently. Head bits are set when a :HEAD-MARKER is
+planted, avoiding the uninitialized head state in the upstream implementation."
   (let* ((cells (copy-seq (column-cells column)))
          (heads (copy-seq (column-heads column)))
          (spaces (column-spaces column))
@@ -184,11 +146,6 @@ set the head bit when we plant a :HEAD-MARKER and clear it otherwise."
     (loop for row from (1- height) downto 1
           do (setf (svref cells row) (svref cells (1- row))
                    (sbit heads row) (sbit heads (1- row))))
-    ;; Read the deciding cell AFTER the shift and at index 1, exactly where
-    ;; upstream reads it. For any HEIGHT above 1 that is the cell which just
-    ;; left the top row; at HEIGHT 1 the shift is a no-op and upstream reads
-    ;; the untouched row, so deferring the read keeps even that degenerate
-    ;; case faithful.
     (setf previous (svref cells 1)
           (sbit heads 0) 0)
     (cond
@@ -240,16 +197,10 @@ the animation shows without resetting where it is."
                 :update (column-update column)))
 
 (defun %resize-column (column height)
-  "Return COLUMN reflowed to a HEIGHT+1 element buffer, keeping the rows that
-remain visible and padding newly exposed rows with :EMPTY.
-
-This deliberately does NOT do what upstream does. Upstream calls `var_init()`
-on resize, wiping every column back to its initial state; we keep the running
-animation and only reflow it, because a terminal resize that blanks the
-screen is worse than one that reflows. LENGTH and SPACES are re-derived by
-clamping rather than redrawing, since this function takes no random state and
-must stay pure -- a stream longer than the new screen would otherwise never
-finish growing."
+  "Return COLUMN reflowed to a HEIGHT+1 element buffer, preserving visible
+rows and padding newly exposed rows with :EMPTY. The running animation is
+preserved across resize; LENGTH and SPACES are clamped without consuming
+randomness, so this function remains pure."
   (let* ((old-cells (column-cells column))
          (old-heads (column-heads column))
          (size (1+ height))

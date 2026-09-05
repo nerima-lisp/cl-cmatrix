@@ -1,26 +1,3 @@
-;;;; t/mutation-test.lisp
-;;;;
-;;;; Mutation testing, per nerima-lisp/.github's TEST_STANDARD.md: SB-COVER's
-;;;; line/branch coverage proves a line executed, not that a wrong result
-;;;; there would be caught. RUN-MUTATIONS mutates a pure function's body
-;;;; (flipping comparison/arithmetic operators, boolean literals, and IF
-;;;; branches) and re-checks each variant against the same case battery a unit
-;;;; test would use; a mutation the battery fails to notice ("survived") marks
-;;;; exactly that gap. Each body is read live from src/ on every run (never
-;;;; copied into this file), so there is nothing here to fall out of sync with
-;;;; the real implementation. Follows nerima-lisp/cl-tty-kit's
-;;;; contrib/weave-mutation-tests.lisp pattern, folded into the main suite
-;;;; rather than kept opt-in, since TEST_STANDARD.md gates this in CI.
-;;;;
-;;;; CHOOSING A TARGET. CL-WEAVE's default operators only rewrite +, -, *, /,
-;;;; the six comparison heads, literal T/NIL, and IF branches. A function
-;;;; built from anything else yields ZERO mutations, and a zero-mutation run
-;;;; scores a vacuous 1.0 -- which is why %ASSERT-FULL-MUTATION-KILL asserts
-;;;; the mutation list is non-empty before scoring it. Two otherwise appealing
-;;;; targets fail exactly this way and are deliberately not used here:
-;;;; %NEXT-ASYNC-COUNT is (1+ (MOD ...)), and 1+ and MOD are not in the
-;;;; arithmetic table; %BLANK-CELL-P is a pair of EQ tests, and EQ is not in
-;;;; the comparison table. Both produce no mutations at all.
 
 (in-package #:cl-cmatrix/test)
 
@@ -66,15 +43,8 @@ and calling MUFFLE-WARNING without one signals a CONTROL-ERROR of its own."
     (when restart (invoke-restart restart))))
 
 (defun %eval-with-bindings (form lambda-list argument-forms)
-  "EVAL FORM with LAMBDA-LIST's parameters bound to ARGUMENT-FORMS' values.
-
-FORM is normally a mutant -- deliberately wrong code -- so the compiler
-routinely proves a mutated bounds check inconsistent with the case arguments
-and warns about the SBIT or SVREF behind it. That warning is the mutation
-doing its job, not a defect, and printing it would make a passing run read
-like a failing one, so it is muffled. Nothing real is hidden: a mutant that
-genuinely cannot run signals at runtime, which RUN-MUTATIONS records as
-ERRORED and ASSERT-MUTATION-SCORE refuses."
+  "Evaluate FORM with LAMBDA-LIST bound to ARGUMENT-FORMS, muffling compiler
+warnings from invalid mutants."
   (handler-bind ((warning #'%muffle-if-possible))
     (eval `(let ,(mapcar #'list lambda-list argument-forms) ,form))))
 
@@ -122,15 +92,6 @@ function first is what rules that out."
       (expect (apply function (mapcar #'eval argument-forms))
               :to-equal expected))))
 
-;;; -------------------------------------------------------------------------
-;;; %COLUMN-ADVANCES-P -- src/state.lisp
-;;;
-;;; Upstream's `count > updates[j] || asynch == 0`. One mutation is generated,
-;;; > -> <=, and since those two are exact complements over reals any case
-;;; with ASYNCP true kills it. The battery is wider than that minimum because
-;;; the threshold semantics (strictly greater, so a column at exactly its own
-;;; threshold does NOT advance) is the part a future edit is most likely to
-;;; get wrong by one.
 
 (defparameter +column-advances-p-cases+
   '((((cl-cmatrix::%make-column :update 2) t 3) t)
@@ -150,21 +111,6 @@ The last two cases hold ASYNCP false with an ASYNC-COUNT that would otherwise
 block the column, pinning upstream's -a-off shortcut where every column
 advances on every frame regardless of its threshold.")
 
-;;; -------------------------------------------------------------------------
-;;; COLUMN-HEAD-P -- src/column.lisp
-;;;
-;;; Three mutations: (<= 0 ROW) -> (> 0 ROW), (< ROW (LENGTH HEADS)) ->
-;;; (>= ROW (LENGTH HEADS)), and (= 1 (SBIT ...)) -> (/= 1 (SBIT ...)).
-;;;
-;;; CASE ORDER IS LOAD-BEARING. Both mutated bounds checks are *looser* than
-;;; the originals on exactly the arguments the originals exist to reject: the
-;;; first admits a negative ROW and the second admits a ROW at or past the
-;;; buffer end, and either then reaches SBIT out of range and signals. CL-WEAVE
-;;; counts that as ERRORED, not KILLED, and ASSERT-MUTATION-SCORE fails on any
-;;; errored mutation. The first case therefore has to be an in-bounds head row
-;;; expecting T, which every mutant contradicts immediately -- the oracle stops
-;;; at that first mismatch, so no mutant ever evaluates the out-of-range cases
-;;; below it. Keep an in-bounds T case first when editing this table.
 
 (defparameter +column-head-p-cases+
   '((((cl-cmatrix::%make-column :heads #*01100) 1) t)
@@ -183,17 +129,6 @@ valid indices, one index past each of them, and -- via the all-ones and
 last-bit-set columns -- proof that index 0 and index (1- (LENGTH HEADS)) are
 both genuinely inside the range rather than rejected by an off-by-one guard.")
 
-;;; -------------------------------------------------------------------------
-;;; COLUMN-CELL-AT -- src/column.lisp
-;;;
-;;; The only target here carrying a CONDITIONAL-BRANCH mutation as well as
-;;; comparison ones: the IF's arms are swapped, so an in-bounds row returns
-;;; :EMPTY and an out-of-range row indexes the buffer. Both bounds mutations
-;;; are looser than the originals in the same direction as COLUMN-HEAD-P's,
-;;; and the branch swap turns an out-of-range row straight into an SVREF, so
-;;; the same ordering rule applies with more force: the first case must be an
-;;; in-bounds row whose cell is NOT :EMPTY, which is the single case that
-;;; distinguishes all three mutants at once.
 
 (defparameter +column-cell-at-cases+
   '((((cl-cmatrix::%make-column :cells #(:empty #\a :space)) 1) #\a)
@@ -212,7 +147,6 @@ index next to the synthesised :EMPTY at an invalid one. Those two must agree,
 which is what makes the out-of-range answer indistinguishable from a real
 cell and therefore worth pinning.")
 
-;;; -------------------------------------------------------------------------
 
 (describe "src/state.lisp: %COLUMN-ADVANCES-P mutation coverage"
   (it "the case battery matches the live function on every case"
