@@ -74,7 +74,7 @@ the same way upstream's `update = keypress - 48` does, where a larger digit is
 slower.
 
 `-u 0` is capped at one base tick per advance rather than busy-looping as
-upstream does. This is a deliberate deviation: the animation is
+upstream does. The animation is
 indistinguishable at 100 frames per second on a real terminal, and the
 alternative pins a core for as long as the screensaver is up.
 
@@ -127,10 +127,9 @@ composes the engine directly instead. The three pieces are a state, a
     (setf state (cl-cmatrix:matrix-advance state))
     (cl-tty-kit:renderer-clear renderer)
     (cl-cmatrix:matrix-draw (cl-tty-kit:renderer-screen renderer) state context)
-    ;; The diffed ANSI frame for this tick; write it wherever you like.
     (cl-tty-kit:renderer-render renderer))
   (cl-cmatrix:matrix-state-tick state))
-;; => 60
+;; 60
 ```
 
 Reuse one `render-context` for the lifetime of a renderer rather than making
@@ -239,9 +238,8 @@ compare output across the two paths.
 (matrix-resize state new-width new-height)
 ```
 
-Return `state` reflowed to `new-width` by `new-height` screen cells. A height
-change reflows every stream's buffer, preserving the rows that remain visible
--- deliberately not upstream's full re-initialisation. A width change keeps
+change reflows every stream's buffer, preserving the rows that remain visible.
+A width change keeps
 the surviving streams exactly as they were, spawns fresh ones for newly
 exposed columns from a copy of `state`'s own random state, and drops the
 rightmost ones when narrowing. A resize mid-run is therefore exactly as
@@ -365,7 +363,7 @@ built-in glyph set for [`make-matrix-state`](#make-matrix-state)'s `:glyphs`.
 
 | Name | Glyphs | Origin |
 | --- | --- | --- |
-| `:ascii` | U+0021 through U+007A, `!` through `z` | Upstream's default draw, `rand() % 90 + 33`. Deliberately stops short of `{`, `\|`, `}` and `~`. |
+| `:ascii` | U+0021 through U+007A, `!` through `z` | Upstream's default draw, `rand() % 90 + 33`; excludes `{`, `\|`, `}` and `~`. |
 | `:classic` | U+3000 through U+303E, CJK Symbols and Punctuation | What upstream's `-c` selects, reproduced by code point. |
 | `:katakana` | U+FF66 through U+FF9D, half-width katakana | Ours, not upstream's. The closest a Unicode terminal font gets to the film's look. |
 | `:binary` | `0` and `1` | Ours; upstream has no equivalent. |
@@ -379,12 +377,8 @@ the registry's own vector rather than a copy, so two calls with the same
 every later caller in the process, permanently: nothing rebuilds the registry
 after load, so the damage outlives the call, the state, and the animation.
 
-Copying on every call was considered and rejected. The expected use is to pass
-the result straight to [`make-matrix-state`](#make-matrix-state)'s `glyphs`,
-which stores the vector and only ever reads it; charging that path an
-allocation proportional to the glyph set, on every call, to defend against a
-mutation no correct caller performs is the wrong trade. If you want a vector
-you may modify, ask for one: `(copy-seq (charset-glyphs :binary))`.
+The result is shared and must not be modified. Use `(copy-seq (charset-glyphs
+:binary))` when a mutable vector is needed.
 
 ## Defaults
 
@@ -597,5 +591,5 @@ a working command line or a working call:
   [`run-matrix`](#run-matrix) kept their names.
 - `-m` is new in 1.0.0, not a changed flag: 0.2.0 had no `-m` and no lambda
   glyph set. It is a render *mode* over whichever glyph set is in force,
-  which is why it is not a `--charset` value -- heads keep their real glyphs,
+  so it is not a `--charset` value -- heads keep their real glyphs,
   and a glyph set could not express that.

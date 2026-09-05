@@ -58,7 +58,7 @@ A vector obtained from [`charset-glyphs`](api.md#charset-glyphs) always
 satisfies the contract, so a caller reaching a glyph set by name can never see
 this condition; it is reachable only by passing a vector of one's own.
 
-The check is at *construction*, and deliberately so. Without it an empty
+The check runs at *construction*. Without it an empty
 `glyphs` was accepted by `make-matrix-state` and failed several
 [`matrix-advance`](api.md#matrix-advance) calls later with a raw `type-error`
 -- which is not a `cl-cmatrix-error`, and so escaped the single

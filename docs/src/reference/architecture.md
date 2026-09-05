@@ -39,7 +39,7 @@ qualification.
 | `src/cli-options.lisp` | Declarative `cl-cli` option metadata and registry-derived choices. |
 | `src/cli.lisp` | `cl-cmatrix/cli`: flag parsing, `main`, `image-entry-point`. |
 
-## What the engine exports, and what it deliberately does not
+## What the engine exports and omits
 
 `src/package.lisp`'s `:export` list is the v1.0.0 compatibility promise: the
 six conditions with their readers, the two registries, the three default
@@ -51,7 +51,7 @@ which is enough to embed the animation in a caller's own loop -- and not at
 the state's internals.
 
 `column`, `run-state`, `src/config.lisp`'s tuning constants and the raw glyph
-vectors are absent on purpose. Those are the representations most likely to
+vectors are not exported. Those are the representations most likely to
 move, and exporting a representation freezes the implementation behind it;
 glyph sets and color schemes are therefore reached by *name* through the
 registries rather than by their constants, so the vectors stay free to
@@ -111,7 +111,7 @@ render-mode flags (`bold`, `partial-bold-p`, `no-bold-p`, `old-style-p`,
 (`asyncp` and the cycling `async-count`), a frame counter, and an injected
 `random-state`. Nothing in it touches a terminal or owns renderer caches.
 
-There is deliberately **no speed slot**. Pace belongs to the driver loop, not
+There is **no speed slot**. Pace belongs to the driver loop, not
 to the animation state: `run-state` (`src/run-state.lisp`) wraps a
 `matrix-state` together with a `cl-tty-kit` renderer, a typed input poller, a
 render context, an optional persistent `cl-concurrent-kit` executor, its
@@ -128,7 +128,7 @@ Keeping them separate is what lets `t/`'s deterministic tests call
 `matrix-advance` directly, seed a `random-state`, and assert on exact
 resulting column state, with no renderer, no terminal, and no real time
 involved. A single merged struct would force every one of those tests
-through a real or faked terminal session just to construct it.
+through a terminal session just to construct it.
 
 ## Why pace is a tick count and not a sleep interval
 
@@ -210,19 +210,18 @@ unregistered -- stays hand-written at each site instead. Its name and
 visibility differ too much between the two registries (public
 `charset-glyphs` returning the looked-up value directly, versus a private
 per-scheme accessor feeding three further generated readers) for folding it
-into the shared macro to read as anything but a forced abstraction.
+into the shared macro without obscuring the difference.
 
-`:rainbow` is deliberately *not* an entry in `+color-schemes+`. It has no RGB
+`:rainbow` is *not* an entry in `+color-schemes+`. It has no RGB
 triples of its own and instead means "resolve a real registered scheme per
 column", which `matrix-draw` is the only place to do. `color-choice-p`
 accepts both a registered name and `:rainbow`, and is the predicate anything
 read from `--color` is validated against; `color-scheme-p` is the narrower
 one.
 
-## Where this system diverges from upstream on purpose
+## Where this system diverges from upstream
 
-Three divergences are choices rather than omissions, and each is recorded at
-the site that makes it.
+Three divergences are recorded at the site that makes each choice.
 
 The **color model** is ours. Upstream paints a whole stream one color with a
 white head; `matrix-cell-style` instead blends the scheme's bright RGB toward

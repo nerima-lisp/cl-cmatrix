@@ -16,8 +16,7 @@ dragging a trail, the default glyphs are upstream's own `!` through `z`
 (U+0021-U+007A), and `-c` draws the CJK Symbols and Punctuation block
 (U+3000-U+303E) that upstream's `-c` draws.
 
-The color gradient is the deliberate departure, and the one place this
-project does not follow upstream: every trail is a 256-color fade from a
+The color gradient differs from upstream: every trail is a 256-color fade from a
 white head through a named scheme's bright color down to the background,
 with `rainbow` for a different scheme per column. Half-width katakana
 (`--charset katakana`) and a 0/1 set (`--charset binary`) are extensions of
@@ -104,14 +103,9 @@ For informational performance measurements, see the
 The benchmark writes tab-separated results and does not enforce a performance
 threshold.
 
-Tests live in `t/` and run under [cl-weave](https://github.com/nerima-lisp/cl-weave),
-the org's test framework. Fall timing, glyph choice, and reset are all routed
-through an injectable `RANDOM-STATE`, so the deterministic tests pin exact
-output from a fixed seed rather than asserting on visual output. Parametrized
-cases use cl-weave's `it-each` table-test macro rather than a hand-rolled
-loop over `expect`, so each input gets its own named pass/fail instead of one
-aggregate result; shared setup uses `before-each` fixtures over a dynamic
-variable rather than copy-pasted `let` bindings.
+Tests live in `t/` and run under [cl-weave](https://github.com/nerima-lisp/cl-weave).
+An injectable `RANDOM-STATE` makes timing, glyph choice, and reset deterministic;
+table tests report each input separately.
 
 `t/pty-e2e.exp` sits alongside them but is not part of that suite. It drives
 the built binary through a real pseudo-terminal to check alternate-screen and

@@ -18,8 +18,7 @@ block (U+3000-U+303E) that upstream's `-c` draws. It follows upstream's
 algorithm, not its source: every character of the implementation is
 original Lisp.
 
-The color gradient is the deliberate departure, and the one place this
-project does not follow upstream. Upstream paints a whole stream in a single
+The color gradient differs from upstream. Upstream paints a whole stream in a single
 color and whitens only its head; here every trail is a 256-color fade from a
 white head through a named scheme's bright color down to the background,
 with `rainbow` drawing each column from a different scheme.

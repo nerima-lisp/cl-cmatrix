@@ -91,15 +91,10 @@ Each body is read live from `src/` on every run, never copied into the test
 file, so there is nothing here to fall out of sync with the real
 implementation.
 
-Two things about that file are load-bearing and easy to undo by accident.
-`cl-weave` scores a function it could not mutate as a perfect 1.0, so the
-helper asserts the mutation list is non-empty before scoring it -- a target
-built from operators outside the mutation tables (`%next-async-count` is
-`1+` over `mod`; `%blank-cell-p` is a pair of `eq` tests) yields zero
-mutations and would otherwise pass while proving nothing. And each case table
-must keep an in-bounds case first: both mutated bounds checks are *looser*
-than the originals, so a mutant that reaches an out-of-range case signals
-instead of failing, which `cl-weave` records as errored rather than killed.
+The helper asserts that the mutation list is non-empty because `cl-weave`
+scores an unmutated function as 1.0. Bounds-check case tables begin with an
+in-bounds case because looser mutants can signal on out-of-range inputs;
+`cl-weave` records that as an error rather than a killed mutant.
 
 ### Pseudo-terminal end-to-end check
 
@@ -116,8 +111,8 @@ The script spawns `cl-cmatrix --fps 1 --seed 1` twice on an 80x24 pty under
 alternate-screen entry, then cursor hide, then -- after `q` in the first case
 and `SIGINT` in the second -- cursor restore, then alternate-screen exit. Both
 cases require the process to exit 0 on its own rather than die from the
-signal, which is why the second spawn `exec`s the binary: `SIGINT` has to
-reach it and not the wrapping shell. The first case additionally compares
+signal, so the second spawn `exec`s the binary and `SIGINT` reaches it rather
+than the wrapping shell. The first case additionally compares
 `stty -g` from before and after the run, masking off `PENDIN` (kernel state
 set while canonical input is being restored, not a setting the program owns),
 so a run that leaves the terminal in raw mode fails instead of merely looking
@@ -125,7 +120,7 @@ wrong afterwards. On any failure the captured pty transcript is written to
 stderr.
 
 CI runs it as the `pty-e2e` job in `.github/workflows/ci.yml`, separately
-from `nix flake check`. It stays out of the flake on purpose: a check inside
+from `nix flake check`. It stays out of the flake because a check inside
 the Nix build sandbox would depend on a pty being available there, and a
 failure for that reason would be indistinguishable from the
 terminal-restoration bug the script exists to catch.
@@ -195,20 +190,8 @@ against `+minimum-expression-percent+` and `+minimum-branch-percent+`, which
 that file defines. The run prints both measurements next to both floors, so
 the current numbers come from the build log rather than from this page.
 
-**Those floors are a ratchet, not headroom.** Read this before reacting to a
-red gate. Until v1.0.0 they were set far below the measurement so that a
-harmless refactor could not trip them by chance; the cost was that they could
-not notice a real regression until several points of coverage had already
-been lost, which is exactly what the upstream-conformance rewrite -- most of
-`src/` replaced at once -- was in a position to do quietly. Since v1.0.0 each
-floor sits roughly one point under the measurement it was set from. The
-accepted consequence is the mirror of the old one: a change that legitimately
-costs more than about a point of coverage now fails the gate and has to be
-looked at.
-
-Two rules follow, and neither is negotiable by argument alone. Raise a floor
-when a new measurement clears it -- these numbers are meant to be edited
-upward, not left alone for years. Never lower one to make a red gate green.
+Treat the floors as regression gates, not headroom. Raise a floor when new
+coverage clears it; never lower one to make a red gate green.
 
 The two floors are not the same number because the remaining expression gap
 is structural rather than a testability shortfall. `sb-cover` never credits
@@ -219,9 +202,8 @@ been rewritten into a called function to get credit where that was possible.
 `run-matrix`'s and `main`'s true I/O bodies are covered for real, but only
 via the out-of-process `it-isolated` tests above, and are invisible to this
 process's coverage data by `sb-cover`'s per-process design.
-`scripts/coverage-entry.lisp`'s own header comment enumerates every category
-of uncoverable line, with the experiments that established each one; read it
-before proposing to move either floor in either direction.
+The remaining gap is a property of `sb-cover` and the process boundary, not a
+reason to lower either floor.
 
 ## Source layout
 
