@@ -14,11 +14,8 @@ nix build .#cl-cmatrix   # the ASDF system as a library, no binary
 nix flake check       # every gate below, the same set CI runs
 ```
 
-Every `nix build` on this page that is not building the binary passes an
-explicit `-o`/`--out-link`. Several outputs here are built from the same
-working tree, and each of them would otherwise claim the default `./result`
-in turn -- so a bare `nix build .#docs` silently replaces the binary symlink
-that the pseudo-terminal check below depends on.
+Use an explicit `-o`/`--out-link` for non-binary builds so their outputs do
+not replace the default `./result` symlink used by the binary checks.
 
 ### Flake outputs
 
@@ -44,28 +41,12 @@ nix flake check       # tests + coverage + formatting + docs together
 ```
 
 Tests live in `t/` and run under
-[`cl-weave`](https://github.com/nerima-lisp/cl-weave). Most files are named
-for the `src/` file they exercise, but the mapping is by *concern*, not one
-file per source file. Four files are named for a behaviour that spans
-several sources -- `advance-test.lisp` (the determinism guarantee),
-`resize-test.lisp` (reflow), `state-machine-test.lisp` (the invariants every
-reachable state has to satisfy under arbitrary advance/resize sequences), and
-`mutation-test.lisp` -- and two read files off disk rather than calling
-loaded symbols: `mutation-test.lisp` reads `src/`, and `docs-test.lisp` reads
-`docs/src` to check this documentation against the implementation. Adding a
-`src/` file does not oblige you to add a matching `t/` file; leaving its
-behaviour unexercised does.
-
-Stream spawn timing, glyph choice, and each column's async threshold are all
-drawn from an injectable `random-state`, so the deterministic tests pin exact
-resulting column state from a fixed seed rather than asserting on rendered
-output. Parametrized cases use `cl-weave`'s `it-each` table-test macro
-instead of a hand-rolled loop over `expect`, so each input gets its own named
-pass/fail; invariants that should hold across a generated input space use
-`it-property`; shared setup uses `before-each` fixtures over a dynamic
-variable instead of copy-pasted `let` bindings.
-`t/concurrent-test.lisp` additionally checks deterministic executor-backed
-advances for wide matrices and keeps the serial fallback covered.
+[`cl-weave`](https://github.com/nerima-lisp/cl-weave). Tests are organized by
+concern, including determinism, resize reflow, state-machine invariants,
+mutation coverage, concurrency, CLI isolation, and documentation checks.
+Randomness is injectable, so deterministic tests assert exact state from fixed
+seeds. `it-each`, `it-property`, and shared fixtures provide named cases and
+generated invariant checks.
 
 `run-matrix` itself, and `main`/`image-entry-point` (`src/cli.lisp`), are
 never called from the main test process: all three end in either a real
@@ -77,53 +58,25 @@ for why.
 
 ### Mutation testing
 
-Beyond example-based `describe`/`it`/`expect` tests, `t/mutation-test.lisp`
-uses `cl-weave`'s `run-mutations`/`assert-mutation-score` against three pure
-functions: `%column-advances-p` (`src/state.lisp`), the async gate that
-decides whether a column moves this frame, and `column-head-p` and
-`column-cell-at` (`src/column.lisp`), the two bounds-checked cell accessors.
-It mutates each function's body -- flipping comparison and arithmetic
-operators, boolean literals, and `if` branches -- and re-checks every variant
-against the same case battery a unit test would use. `sb-cover` line coverage
-proves a line executed, not that a wrong result there would be caught; a
-mutation the battery fails to notice ("survived") marks exactly that gap.
-Each body is read live from `src/` on every run, never copied into the test
-file, so there is nothing here to fall out of sync with the real
-implementation.
-
-The helper asserts that the mutation list is non-empty because `cl-weave`
-scores an unmutated function as 1.0. Bounds-check case tables begin with an
-in-bounds case because looser mutants can signal on out-of-range inputs;
-`cl-weave` records that as an error rather than a killed mutant.
+`t/mutation-test.lisp` uses `cl-weave` mutation testing against the pure state
+and column-accessor functions. Mutants are read from `src/` and checked
+against the unit-test cases; surviving mutants expose gaps that line coverage
+would miss. The helper also requires a non-empty mutation set and starts
+bounds-check cases with an in-bounds input so invalid mutants are classified
+correctly.
 
 ### Pseudo-terminal end-to-end check
 
-`t/pty-e2e.exp` drives the delivered binary through a real pseudo-terminal.
-The in-process `cl-weave` suite structurally cannot cover this: `run-matrix`
-is never called there, and what matters here -- entering the alternate screen,
-hiding the cursor, restoring both on the way out, and handing the terminal
-back in the `termios` state it was borrowed in -- only happens once a raw-mode
-full-screen program is attached to something that can actually be put into raw
-mode. A pipe cannot.
+`t/pty-e2e.exp` drives the delivered binary through a real pseudo-terminal to
+check alternate-screen and cursor control sequences, clean exit on `q` and
+`SIGINT`, and restoration of the borrowed `termios` state.
 
-The script spawns `cl-cmatrix --fps 1 --seed 1` twice on an 80x24 pty under
-`TERM=xterm-256color` and asserts the exact control sequences in order:
-alternate-screen entry, then cursor hide, then -- after `q` in the first case
-and `SIGINT` in the second -- cursor restore, then alternate-screen exit. Both
-cases require the process to exit 0 on its own rather than die from the
-signal, so the second spawn `exec`s the binary and `SIGINT` reaches it rather
-than the wrapping shell. The first case additionally compares
-`stty -g` from before and after the run, masking off `PENDIN` (kernel state
-set while canonical input is being restored, not a setting the program owns),
-so a run that leaves the terminal in raw mode fails instead of merely looking
-wrong afterwards. On any failure the captured pty transcript is written to
-stderr.
+It runs `cl-cmatrix --fps 1 --seed 1` twice on an 80x24 pty under
+`TERM=xterm-256color`, and compares the terminal state before and after the
+interactive case. Failures include the captured pty transcript.
 
-CI runs it as the `pty-e2e` job in `.github/workflows/ci.yml`, separately
-from `nix flake check`. It stays out of the flake because a check inside
-the Nix build sandbox would depend on a pty being available there, and a
-failure for that reason would be indistinguishable from the
-terminal-restoration bug the script exists to catch.
+CI runs it as the `pty-e2e` job in `.github/workflows/ci.yml`, separately from
+`nix flake check` because the Nix build sandbox does not provide a pty.
 
 To run it locally you need `expect`, plus `perl` and `stty` on `PATH`, and an
 already-built binary:
@@ -134,19 +87,14 @@ nix shell --inputs-from . nixpkgs#expect --command \
   expect t/pty-e2e.exp ./pty-binary/bin/cl-cmatrix
 ```
 
-`--inputs-from .` takes `expect` from this flake's own pinned nixpkgs rather
-than from whatever happens to be installed, which is what makes a local run
-mean the same thing as the CI job. Setting `TMPDIR` is optional hygiene: the
-script allocates its transcripts with `file tempfile` rather than building a
-predictable path, so it works without the variable and does not race a
-world-writable `/tmp`.
+`--inputs-from .` uses this flake's pinned nixpkgs, matching CI. `TMPDIR` is
+optional because the script creates unique temporary transcripts.
 
 ### Informational benchmarks
 
 The benchmark suite measures matrix advancement and rendering without making
-the run a pass/fail gate. It writes tab-separated results to
-`BENCHMARK_OUTPUT` and one log per child process under `BENCHMARK_LOG_DIR`.
-Keep those paths outside the repository when running locally:
+the run a pass/fail gate. It writes TSV results to `BENCHMARK_OUTPUT` and
+child-process logs under `BENCHMARK_LOG_DIR`; keep both outside the repository:
 
 ```sh
 nix develop --command sh -c \
@@ -160,22 +108,12 @@ nix develop --command sh -c \
    ./scripts/benchmark-suite.sh'
 ```
 
-Use comma-separated values in `BENCHMARK_SIZES` to measure multiple matrix
-sizes. `BENCHMARK_PROCESSES`, `BENCHMARK_TICKS`, `BENCHMARK_WARMUP`, and
-`BENCHMARK_SAMPLES` control process count and sampling volume; the suite also
-accepts `BENCHMARK_TIMEOUT_SECONDS` for the per-process timeout.
-
-`scripts/benchmark.lisp` is the measurement itself: one SBCL process, one
-matrix size, a fixed seed, and three workloads -- matrix advance, advance plus
-dirty render, and advance plus dirty render plus ANSI encode -- each reported
-as per-sample, median, min/max and spread figures in ns/tick and
-bytes-consed/tick. It applies no threshold and can be run on its own
-(`sbcl --script scripts/benchmark.lisp --help` lists its options).
-`scripts/benchmark-suite.sh` measures nothing of its own: it runs that runner
-once per size and process index under the timeout, parses the matrix-advance
-and dirty-render medians back out of each log into the TSV, and fails if a
-size did not produce the expected number of rows. The ANSI-encode workload is
-reported by the runner but not carried into the TSV.
+Use comma-separated values in `BENCHMARK_SIZES` for multiple matrix sizes.
+`BENCHMARK_PROCESSES`, `BENCHMARK_TICKS`, `BENCHMARK_WARMUP`,
+`BENCHMARK_SAMPLES`, and `BENCHMARK_TIMEOUT_SECONDS` control the run.
+`scripts/benchmark.lisp` reports advance, dirty-render, and ANSI-encode
+workloads; `scripts/benchmark-suite.sh` aggregates the first two into TSV and
+checks that every requested size produced the expected rows.
 
 ### Coverage
 
@@ -183,27 +121,18 @@ reported by the runner but not carried into the TSV.
 nix build .#checks.<system>.coverage -o coverage-report
 ```
 
-`$out` is the `sb-cover` HTML report itself, produced by `cl-nix-forge`'s
-`mkCoverageReport`. `scripts/coverage-entry.lisp` runs as its entry point:
-it loads and runs the test suite, then gates on `cl-weave:coverage-statistics`
-against `+minimum-expression-percent+` and `+minimum-branch-percent+`, which
-that file defines. The run prints both measurements next to both floors, so
-the current numbers come from the build log rather than from this page.
+The output is an `sb-cover` HTML report from `cl-nix-forge`'s
+`mkCoverageReport`. `scripts/coverage-entry.lisp` runs the suite and gates
+`cl-weave:coverage-statistics` against its expression and branch floors; the
+build log prints the measured values beside those floors.
 
 Treat the floors as regression gates, not headroom. Raise a floor when new
 coverage clears it; never lower one to make a red gate green.
 
-The two floors are not the same number because the remaining expression gap
-is structural rather than a testability shortfall. `sb-cover` never credits
-compile-time-only forms -- an `in-package` form, a `defpackage` body, a bare
-`defmacro`'s own template, a `defstruct` slot's `:type` declaration -- and
-every `defparameter` whose value was more than a bare literal has already
-been rewritten into a called function to get credit where that was possible.
-`run-matrix`'s and `main`'s true I/O bodies are covered for real, but only
-via the out-of-process `it-isolated` tests above, and are invisible to this
-process's coverage data by `sb-cover`'s per-process design.
-The remaining gap is a property of `sb-cover` and the process boundary, not a
-reason to lower either floor.
+The expression floor is lower because `sb-cover` does not credit
+compile-time-only forms and does not combine coverage from the out-of-process
+CLI tests. This is a limitation of the measurement, not a reason to lower
+either floor.
 
 ## Source layout
 
