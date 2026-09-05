@@ -9,7 +9,6 @@ on:
 permissions:
   contents: read
 
-# Supersede in-flight runs for the same PR; never cancel a push to main.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -17,13 +16,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # A hung SBCL test would otherwise hold a runner for the full 6-hour
-    # default. `nix flake check` finishes in about 4 minutes from a cold cache.
     timeout-minutes: 30
     steps:
-      # persist-credentials: false — this job runs untrusted PR code via
-      # `nix flake check`, and never needs the token, so don't leave it in
-      # .git/config for that code to read.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -33,19 +27,9 @@ jobs:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      # `nix flake check` runs the SBCL test suite *and* the treefmt
-      # formatting gate (checks.formatting), so unformatted Nix fails CI here.
       - name: Check flake
         run: nix flake check --print-build-logs
 
-  # Terminal-state restoration is invisible to an in-process test: nothing
-  # inside the image can observe whether the alternate screen was left and the
-  # termios the shell had before the run came back. `t/pty-e2e.exp` drives the
-  # real binary through a real pseudo-terminal to check exactly that, so it
-  # needs a built executable rather than a loaded system, and it stays a job of
-  # its own instead of a `nix flake check` entry: the check would then depend
-  # on a pty inside the Nix build sandbox, and a failure there would be
-  # indistinguishable from the terminal-restoration bug it exists to catch.
   pty-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -59,27 +43,9 @@ jobs:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      # --out-link, never the default ./result: `nix build .#docs` writes to
-      # that same name, so a bare `nix build` here would be silently replaced
-      # by whichever build ran last and the expect script would drive the wrong
-      # store path -- or a directory with no bin/ at all.
       - name: Build the executable
         run: nix build --print-build-logs --out-link "$RUNNER_TEMP/cl-cmatrix"
 
-      # expect comes from THIS flake's pinned nixpkgs (--inputs-from .), not
-      # from the runner image and not from the user's flake registry. The image
-      # is not guaranteed to ship expect at all, and a version that merely
-      # happens to be installed would make this gate mean something different
-      # locally than it does here.
-      #
-      # TMPDIR keeps the script's `file tempfile` transcripts inside the job's
-      # own scratch directory, which the runner cleans up, instead of a shared
-      # /tmp. The script no longer requires the variable to be set -- it stopped
-      # building a fixed path out of it -- so this is hygiene rather than a
-      # precondition, and the job still works without it.
-      #
-      # No pipe: expect's exit status is the result of this gate, and piping it
-      # into anything at all would report the pipe's status instead.
       - name: Drive the binary through a pseudo-terminal
         env:
           TMPDIR: ${{ runner.temp }}
