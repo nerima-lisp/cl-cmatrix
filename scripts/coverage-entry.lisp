@@ -1,4 +1,4 @@
-
+(asdf:load-system "cl-cmatrix/test")
 
 (defconstant +minimum-expression-percent+ 86)
 (defconstant +minimum-branch-percent+ 93)
