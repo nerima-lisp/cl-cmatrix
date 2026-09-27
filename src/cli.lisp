@@ -88,7 +88,10 @@ do not use WITH-OPEN-FILE's aborting close for a bidirectional stream."
                                  :fd fd
                                  args))))
             (close terminal)))
-        (apply run-matrix-fn args))))
+        (let ((stream (getf args :stream *standard-output*)))
+          (unless (interactive-stream-p stream)
+            (error "Cannot run cl-cmatrix: standard output is not a terminal."))
+          (apply run-matrix-fn args)))))
 
 (defun %cmatrix-run-with-sighup (thunk)
   (let ((handler (lambda (&rest args)

@@ -247,6 +247,19 @@ thread ends up doing the work."
       (values seen-args seen-term code))))
 
 (describe "%cmatrix-handler: what actually reaches RUN-MATRIX"
+  (it "rejects the default non-terminal output before calling RUN-MATRIX"
+    (let ((called nil)
+          (stream (make-string-output-stream)))
+      (expect (handler-case
+                  (cl-cmatrix/cli::%cmatrix-run-with-terminal
+                   (list :stream stream)
+                   :run-matrix-fn (lambda (&rest args)
+                                    (declare (ignore args))
+                                    (setf called t)))
+                (error () :rejected))
+              :to-equal :rejected)
+      (expect (not called) :to-be-truthy)))
+
   (it "applies RUN-MATRIX to the plist %CMATRIX-RUN-MATRIX-ARGS resolved"
     (multiple-value-bind (args term code)
         (record-handler-call '("--speed" "2.5" "-C" "cyan" "-g" "katakana" "-u" "6"
