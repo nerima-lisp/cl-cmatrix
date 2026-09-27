@@ -149,6 +149,16 @@ than the blank buffers of a fresh state. ASYNCP is off so every column advances.
       (expect (signals invalid-dimensions (matrix-resize state new-width new-height))
               :to-be-truthy)))
 
+  (it-each ((0 4) (4 0))
+      "keeps the previous state when terminal size is unavailable: ~S x ~S"
+      (columns rows)
+    (let ((state (make-matrix-state 4 4 :random-state (sb-ext:seed-random-state 15))))
+      (expect (eq state
+                  (cl-cmatrix::%poll-resize
+                   state 0 (lambda (fd) (declare (ignore fd))
+                             (values columns rows))))
+              :to-be-truthy)))
+
   (it-property "always yields a MATRIX-STATE of exactly the requested new dimensions, with
 HEIGHT+1 cell buffers, for any valid starting and target size"
       ((width (gen-integer :min 1 :max 40))

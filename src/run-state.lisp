@@ -190,7 +190,8 @@ change, or NIL when EVENT is not a command understood by CL-CMATRIX."
   "Return MATRIX reflowed to the terminal size TERMINAL-SIZE-FN reports for
 FD, or MATRIX unchanged when the size is unavailable or already matches."
   (multiple-value-bind (columns rows) (funcall terminal-size-fn fd)
-    (if (and columns rows
+    (if (and (typep columns '(integer 1 *))
+             (typep rows '(integer 1 *))
              (or (/= columns (matrix-state-width matrix))
                  (/= rows (matrix-state-height matrix))))
         (matrix-resize matrix columns rows)
@@ -277,7 +278,8 @@ itself is running; a tick that is not due is a no-op on the matrix."
 
 (defun %terminal-dimensions (columns rows)
   "Return terminal dimensions, falling back to the classic 80x24 size."
-  (values (or columns 80) (or rows 24)))
+  (values (if (typep columns '(integer 1 *)) columns 80)
+          (if (typep rows '(integer 1 *)) rows 24)))
 
 (defun %make-initial-run-state (width height speed color glyphs bold random-state input-stream
                                 &key executor (workers +default-workers+)

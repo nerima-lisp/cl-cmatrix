@@ -1,6 +1,24 @@
 
 (in-package #:cl-cmatrix/test)
 
+(describe "public type errors"
+  (it "lets callers catch invalid workers as both condition families"
+    (let ((state (make-matrix-state 8 12 :random-state (sb-ext:seed-random-state 17))))
+      (let ((condition (handler-case (matrix-advance state :workers 0)
+                        (cl-cmatrix-error (condition) condition)
+                        (type-error () nil))))
+        (expect (and (typep condition 'cl-cmatrix-error)
+                     (typep condition 'type-error))
+                :to-be-truthy))))
+
+  (it "lets callers catch invalid random state as both condition families"
+    (let ((condition (handler-case (make-matrix-state 2 2 :random-state :bad)
+                      (cl-cmatrix-error (condition) condition)
+                      (type-error () nil))))
+      (expect (and (typep condition 'cl-cmatrix-error)
+                   (typep condition 'type-error))
+              :to-be-truthy))))
+
 (defparameter +parallel-test-width+ cl-cmatrix::+parallel-column-threshold+
   "The narrowest matrix MATRIX-ADVANCE will hand to an executor. Taken from
 the threshold itself so these specs cannot drift onto the serial path if it
