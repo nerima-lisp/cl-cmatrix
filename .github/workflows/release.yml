@@ -30,15 +30,18 @@ jobs:
         run: |
           set -euo pipefail
           tag_version="${GITHUB_REF_NAME#v}"
+          asd_versions="$(sed -n 's/^[[:space:]]*:version "\([^"]*\)".*/\1/p' "$PACKAGE.asd")"
           version_count=0
-          while IFS= read -r asd_version; do
-            version_count=$((version_count + 1))
-            echo "asd=$asd_version tag=$tag_version"
-            if [[ "$asd_version" != "$tag_version" ]]; then
-              echo "::error::Tag $GITHUB_REF_NAME does not match $PACKAGE.asd version $asd_version" >&2
-              exit 1
-            fi
-          done < <(sed -n 's/^[[:space:]]*:version "\([^"]*\)".*/\1/p' "$PACKAGE.asd")
+          if [[ -n "$asd_versions" ]]; then
+            while IFS= read -r asd_version; do
+              version_count=$((version_count + 1))
+              echo "asd=$asd_version tag=$tag_version"
+              if [[ "$asd_version" != "$tag_version" ]]; then
+                echo "::error::Tag $GITHUB_REF_NAME does not match $PACKAGE.asd version $asd_version" >&2
+                exit 1
+              fi
+            done <<< "$asd_versions"
+          fi
           if [[ "$version_count" -eq 0 ]]; then
             echo "::error::No :version entries found in $PACKAGE.asd" >&2
             exit 1
