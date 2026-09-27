@@ -72,3 +72,11 @@ every valid registered scheme.")
      (unknown-charset-name condition) (list-charsets))
   "Signaled by CHARSET-GLYPHS when NAME names no charset registered
 in +CHARSETS+. LIST-CHARSETS names every valid choice.")
+
+(define-condition invalid-argument-type (cl-cmatrix-error type-error)
+  ()
+  (:report (lambda (condition stream)
+             (format stream "Value ~S is not of type ~S."
+                     (type-error-datum condition)
+                     (type-error-expected-type condition))))
+  (:documentation "A type error from a public API that is also a CL-CMATRIX-ERROR."))

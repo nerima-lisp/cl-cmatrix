@@ -502,3 +502,24 @@ so RUN-STATE-RENDER's frame holds the message and nothing else."
                 :to-be-truthy)
         (expect (eq (cl-cmatrix::%column-color 1 :rainbow schemes) (aref schemes 1))
                 :to-be-truthy)))))
+
+(describe "render clipping"
+  (it "clips matrix drawing to the screen dimensions"
+    (let ((state (%state-with-columns
+                  5 4
+                  (list (%test-column (list :empty #\a :empty :empty :empty)
+                                      :heads '(1) :length 3)
+                        (%test-column (list :empty :empty :empty :empty :empty)
+                                      :length 3)
+                        (%test-column (list :empty :empty :empty :empty :empty)
+                                      :length 3))))
+          (screen (make-screen 1 1)))
+      (matrix-draw screen state (make-render-context))
+      (expect (char= (%screen-char screen 0 0) #\a) :to-be-truthy)))
+
+  (it "clips centered messages to the screen dimensions"
+    (let ((screen (make-screen 2 1)))
+      (cl-cmatrix::matrix-draw-message screen 5 4 "hello")
+      (with-soft-assertions
+        (expect (char= (%screen-char screen 0 0) #\h) :to-be-truthy)
+        (expect (char= (%screen-char screen 1 0) #\e) :to-be-truthy)))))

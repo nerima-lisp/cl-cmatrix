@@ -50,7 +50,9 @@ only caller: speed is the driver loop's concern, not a MATRIX-STATE slot."
     (error 'invalid-speed :speed speed)))
 
 (defun %copy-random-state (random-state)
-  (check-type random-state random-state)
+  (unless (typep random-state 'random-state)
+    (error 'invalid-argument-type
+           :datum random-state :expected-type 'random-state))
   (make-random-state random-state))
 
 (defun matrix-state-column-count (width)

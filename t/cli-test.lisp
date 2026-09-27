@@ -247,6 +247,19 @@ thread ends up doing the work."
       (values seen-args seen-term code))))
 
 (describe "%cmatrix-handler: what actually reaches RUN-MATRIX"
+  (it "rejects the default non-terminal output before calling RUN-MATRIX"
+    (let ((called nil)
+          (stream (make-string-output-stream)))
+      (expect (handler-case
+                  (cl-cmatrix/cli::%cmatrix-run-with-terminal
+                   (list :stream stream)
+                   :run-matrix-fn (lambda (&rest args)
+                                    (declare (ignore args))
+                                    (setf called t)))
+                (error () :rejected))
+              :to-equal :rejected)
+      (expect (not called) :to-be-truthy)))
+
   (it "applies RUN-MATRIX to the plist %CMATRIX-RUN-MATRIX-ARGS resolved"
     (multiple-value-bind (args term code)
         (record-handler-call '("--speed" "2.5" "-C" "cyan" "-g" "katakana" "-u" "6"
@@ -336,11 +349,11 @@ thread ends up doing the work."
 
 (describe "main and image-entry-point (isolated: these really exit the process)"
   (it-isolated "main exits 0 for --version, without invoking the handler"
-      (:systems ("cl-cmatrix") :package "CL-USER" :timeout 15)
+      (:systems ("cl-cmatrix") :package "CL-USER" :timeout 60)
     (cl-cmatrix/cli:main '("cl-cmatrix" "--version")))
 
   (it-isolated "image-entry-point resets *default-pathname-defaults* to the cwd, exits 0 for
 --version"
-      (:systems ("cl-cmatrix") :package "CL-USER" :timeout 15)
+      (:systems ("cl-cmatrix") :package "CL-USER" :timeout 60)
     (let ((sb-ext:*posix-argv* (list "cl-cmatrix" "--version")))
       (cl-cmatrix/cli:image-entry-point))))

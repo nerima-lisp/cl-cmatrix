@@ -103,4 +103,53 @@ expect_clean_exit "SIGINT case" $signal_transcript
 log_file
 file delete -force $signal_transcript
 puts "PASS: SIGINT cleanup order is enter-alt, hide, show, leave-alt; exit 0"
-puts "2 passed, 0 failed, 0 skipped"
+
+foreach signal {TERM HUP} {
+    set signal_transcript [file tempfile]
+    log_file -noappend $signal_transcript
+    spawn -noecho sh -c {
+        stty rows 24 cols 80
+        before=$(stty -g)
+        "$1" --fps 1 --seed 1 </dev/tty >/dev/tty 2>/dev/tty &
+        child=$!
+        printf '\r\n__PTY_CHILD_PID__ %s\r\n' "$child"
+        wait "$child"
+        rc=$?
+        after=$(stty -g)
+        normalize_termios() {
+            printf '%s\n' "$1" | perl -F: -lane '$F[3] = sprintf "%x", hex($F[3]) & ~0x20000000; print join ":", @F'
+        }
+        if [ "$(normalize_termios "$before")" = "$(normalize_termios "$after")" ]; then
+            same=1
+        else
+            same=0
+            printf '\r\n__PTY_TERMIOS_BEFORE__ %s\r\n__PTY_TERMIOS_AFTER__ %s\r\n' "$before" "$after"
+        fi
+        printf '\r\n__PTY_SIGNAL_RESULT__ signal=%s rc=%s same=%s\r\n' "$2" "$rc" "$same"
+        exit "$rc"
+    } sh $binary $signal
+    expect {
+        -re {__PTY_CHILD_PID__ ([0-9]+)} { set child_pid $expect_out(1,string) }
+        timeout { fail "child PID marker for SIG$signal was not emitted" $signal_transcript }
+        eof { fail "EOF before child PID marker for SIG$signal" $signal_transcript }
+    }
+    expect_sequence "alternate-screen entry for SIG$signal" $enter_alt $signal_transcript
+    expect_sequence "cursor hide for SIG$signal" $hide_cursor $signal_transcript
+    exec kill -$signal $child_pid
+    expect_sequence "cursor restore after SIG$signal" $show_cursor $signal_transcript
+    expect_sequence "alternate-screen exit after SIG$signal" $leave_alt $signal_transcript
+    expect {
+        -re "__PTY_SIGNAL_RESULT__ signal=$signal rc=0 same=1" { }
+        -re {__PTY_SIGNAL_RESULT__ signal=([^ ]+) rc=([^ ]+) same=([^\r\n]+)} {
+            fail "SIG$signal result was rc=$expect_out(2,string), termios_equal=$expect_out(3,string)" $signal_transcript
+        }
+        timeout { fail "SIG$signal result marker was not emitted" $signal_transcript }
+        eof { fail "EOF before SIG$signal result marker" $signal_transcript }
+    }
+    expect_clean_exit "SIG$signal case" $signal_transcript
+    log_file
+    file delete -force $signal_transcript
+    puts "PASS: SIG$signal cleanup order is enter-alt, hide, show, leave-alt; exit 0"
+}
+
+puts "4 passed, 0 failed, 0 skipped"

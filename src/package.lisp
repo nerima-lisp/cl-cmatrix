@@ -14,6 +14,8 @@ itself SBCL-only). See docs/src/reference/compatibility.md for details.")
                 #:rgb-to-256
                 #:blend-colors
                 #:screen-put-cell
+                #:screen-width
+                #:screen-height
                 #:with-screen-batch
                 #:make-renderer
                 #:renderer-screen
@@ -47,6 +49,7 @@ itself SBCL-only). See docs/src/reference/compatibility.md for details.")
    #:unknown-color-scheme-name
    #:unknown-charset
    #:unknown-charset-name
+   #:invalid-argument-type
    #:list-color-schemes
    #:color-scheme-p
    #:color-choice-p

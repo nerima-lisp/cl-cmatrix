@@ -35,6 +35,7 @@ cl-cmatrix --speed 2 -C cyan
 cl-cmatrix -C rainbow -c        # rainbow trails, upstream's classic CJK glyphs
 cl-cmatrix -g katakana -B       # half-width katakana (our extension), bold trail
 cl-cmatrix --seed 42            # reproducible run
+cl-cmatrix --speed 0.1          # CLI minimum; the library accepts any positive real
 ```
 
 Or as a library:

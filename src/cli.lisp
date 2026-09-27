@@ -88,7 +88,22 @@ do not use WITH-OPEN-FILE's aborting close for a bidirectional stream."
                                  :fd fd
                                  args))))
             (close terminal)))
-        (apply run-matrix-fn args))))
+        (let ((stream (getf args :stream *standard-output*)))
+          (unless (interactive-stream-p stream)
+            (error "Cannot run cl-cmatrix: standard output is not a terminal."))
+          (apply run-matrix-fn args)))))
+
+(defun %cmatrix-run-with-sighup (thunk)
+  (let ((handler (lambda (&rest args)
+                   (declare (ignore args))
+                   (cl-cmatrix::%request-termination))))
+    (unwind-protect
+         (progn
+           (cl-cmatrix::%clear-termination-request)
+           (sb-sys:enable-interrupt sb-unix:sighup handler)
+           (funcall thunk))
+      (sb-sys:enable-interrupt sb-unix:sighup :default)
+      (cl-cmatrix::%clear-termination-request))))
 
 (defun %cmatrix-handler (invocation &key (run-matrix-fn #'run-matrix))
   "Run the animation described by INVOCATION and return the process exit code.
@@ -96,10 +111,12 @@ RUN-MATRIX-FN defaults to #'RUN-MATRIX and is injectable for tests."
   (let* ((args (%cmatrix-run-matrix-args invocation))
          (force-linux-term (getf args :force-linux-term)))
     (remf args :force-linux-term)
-    (if force-linux-term
-        (with-environment-variables (("TERM" "linux"))
-          (%cmatrix-run-with-terminal args :run-matrix-fn run-matrix-fn))
-        (%cmatrix-run-with-terminal args :run-matrix-fn run-matrix-fn)))
+    (%cmatrix-run-with-sighup
+     (lambda ()
+       (if force-linux-term
+           (with-environment-variables (("TERM" "linux"))
+             (%cmatrix-run-with-terminal args :run-matrix-fn run-matrix-fn))
+           (%cmatrix-run-with-terminal args :run-matrix-fn run-matrix-fn)))))
   0)
 
 (defun make-cmatrix-app ()

@@ -51,6 +51,17 @@ does not pay for worker-thread creation and teardown."
            (let ((,executor nil))
              ,@body)))))
 
+(defvar *termination-requested* nil)
+
+(defun %request-termination ()
+  (setf *termination-requested* t))
+
+(defun %clear-termination-request ()
+  (setf *termination-requested* nil))
+
+(defun %termination-requested-p ()
+  *termination-requested*)
+
 (defun run-matrix (&key (speed +default-speed+) (color +default-color+)
                         (glyphs +default-glyphs+) (bold +default-bold+)
                         (partial-bold-p nil) (no-bold-p nil)
@@ -93,7 +104,9 @@ Returns the final MATRIX-STATE."
     (%assert-fps fps))
   (when update-delay
     (%assert-update-delay update-delay))
-  (check-type workers (integer 1 *))
+  (unless (typep workers '(integer 1 *))
+    (error 'invalid-argument-type
+           :datum workers :expected-type '(integer 1 *)))
   (let ((update-ticks (%update-ticks fps update-delay speed)))
     (multiple-value-bind (columns rows) (terminal-size fd)
       (multiple-value-bind (width height) (%terminal-dimensions columns rows)
@@ -124,7 +137,9 @@ Returns the final MATRIX-STATE."
                        run-state
                        #'run-state-advance
                        #'run-state-render
-                       #'run-state-quitp
+                       (lambda (state)
+                         (or (run-state-quitp state)
+                             (%termination-requested-p)))
                        :stream out :interval +base-tick-seconds+
                        :poll (lambda (state) (run-state-poll state :fd fd))))
                   (sb-sys:interactive-interrupt ()

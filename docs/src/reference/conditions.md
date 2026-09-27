@@ -1,14 +1,16 @@
 # Conditions
 
-Every error `cl-cmatrix` signals is a subclass of `cl-cmatrix-error`, defined
-in `src/conditions.lisp`. Catching that one base condition with a single
-`handler-case` clause catches everything the library can signal; each
-subclass carries structured, reader-exposed slots instead of only a message
-string, so a caller can recover programmatically rather than parsing text.
+Library-specific errors `cl-cmatrix` signals are subclasses of
+`cl-cmatrix-error`, defined in `src/conditions.lisp`. Invalid `workers` and
+`random-state` values use `invalid-argument-type`, which also inherits the
+standard `type-error` for compatibility with existing callers. Each condition
+carries structured readers instead of only a message string.
 
-Every subclass besides the base itself is defined through the same
+The ordinary library conditions are defined through the same
 `define-cl-cmatrix-condition` macro, so adding one is a single form rather
-than hand-written `:report` boilerplate.
+than hand-written `:report` boilerplate. `invalid-argument-type` is the
+intentional multiple-inheritance exception for standard `type-error`
+compatibility.
 
 ## Hierarchy
 
@@ -21,16 +23,25 @@ error
     ├── invalid-fps
     ├── invalid-update-delay
     ├── unknown-color-scheme
-    └── unknown-charset
+    ├── unknown-charset
+    └── invalid-argument-type     (also a type-error)
 ```
 
-The hierarchy is flat: every concrete condition inherits `cl-cmatrix-error`
-directly, with no further subclassing between them.
+The library-specific hierarchy is flat except for `invalid-argument-type`,
+which additionally inherits the standard `type-error`.
 
 ## `cl-cmatrix-error`
 
 The base condition. No slots of its own; its only role is to give every
 error `cl-cmatrix` signals a common supertype to catch.
+
+## `invalid-argument-type`
+
+Signals when `workers` is not a positive integer or `random-state` is not a
+`random-state`. This condition has both `cl-cmatrix-error` and `type-error` as
+supertypes, so either kind of handler continues to work. Its standard readers
+`type-error-datum` and `type-error-expected-type` identify the bad value and
+the required type.
 
 ## `invalid-dimensions`
 

@@ -29,7 +29,8 @@ COLOR-CHOICE-P in color-scheme.lisp)."
                 :description
                 "Scale the update delay; larger falls faster (default 1.0).
 An extension of ours rather than an upstream flag: it divides -u, so 2
-advances twice as often as the same delay would on its own.")
+advances twice as often as the same delay would on its own. Values must be at
+least 0.1.")
    (make-option :name "color" :short #\C :kind :value
                 :choices (%cmatrix-color-choices)
                 :default "green"

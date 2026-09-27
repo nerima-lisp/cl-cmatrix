@@ -78,7 +78,9 @@ path. The parallel path is pure with respect to STATE and deterministic for a
 fixed initial RANDOM-STATE. WORKERS controls the number of deterministic
 column chunks; its child random streams are intentionally independent of the
 serial path's random-number consumption."
-  (check-type workers (integer 1 *))
+  (unless (typep workers '(integer 1 *))
+    (error 'invalid-argument-type
+           :datum workers :expected-type '(integer 1 *)))
   (if (and executor
            (>= (matrix-state-width state) +parallel-column-threshold+))
       (%matrix-advance-with-executor state executor workers)
