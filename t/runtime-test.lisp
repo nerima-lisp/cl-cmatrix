@@ -2,6 +2,12 @@
 (in-package #:cl-cmatrix/test)
 
 (describe "run-matrix argument validation"
+  (it-each ((0 24) (80 0) (0 0) (-1 24) (80 -1))
+      "treats non-positive terminal dimensions as unavailable: ~S x ~S"
+      (columns rows)
+    (expect (multiple-value-list (cl-cmatrix::%terminal-dimensions columns rows))
+            :to-equal '(80 24)))
+
   (it-each ((0) (-1) (:not-a-number))
       "signals INVALID-FPS for ~S before terminal setup"
       (fps)

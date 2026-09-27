@@ -59,6 +59,13 @@ Enters raw mode and the terminal's alternate screen for the duration, hides
 the cursor, and always restores all three -- including after a condition or an
 interrupt. Returns the final [`matrix-state`](#matrix-state).
 
+The command-line front end handles SIGHUP as a stop request, so it returns
+through the normal terminal-session cleanup path. SIGTERM keeps SBCL's default
+handler, which also unwinds the terminal session. `run-matrix` does not change
+process signal settings, and SIGPIPE is not caught by this project; a broken
+output stream follows the normal error path. The command-line front end
+rejects a non-TTY standard output before starting the animation.
+
 `color`, `glyphs`, `bold`, `partial-bold-p`, `no-bold-p`, `old-style-p`,
 `lambda-p`, `asyncp`, `random-bold-p`, and `change-glyphs-p` are as in
 [`make-matrix-state`](#make-matrix-state).
