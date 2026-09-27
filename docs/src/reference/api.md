@@ -239,6 +239,9 @@ compare output across the two paths.
 
 `workers` must be a positive integer.
 
+The command-line `--speed` option accepts values from 0.1 upward. The library
+API accepts every positive real value, including values below 0.1.
+
 ### `matrix-resize`
 
 ```lisp
@@ -408,13 +411,20 @@ argument defaults to NIL, which leaves `fps` in charge.
 
 ## Conditions
 
-Every condition `cl-cmatrix` signals derives from `cl-cmatrix-error`, so one
-`handler-case` clause catches them all. See [Conditions](conditions.md) for
-the full hierarchy; the exhaustive symbol list follows.
+Library-specific conditions derive from `cl-cmatrix-error`. Input type errors
+for `workers` and `random-state` are instances of both `invalid-argument-type`
+and the standard `type-error`, preserving handlers written for either API.
+See [Conditions](conditions.md) for the full hierarchy.
 
 ### `cl-cmatrix-error`
 
 Base condition for every error `cl-cmatrix` signals.
+
+### `invalid-argument-type`
+
+Signals for invalid `workers` or `random-state` values. It inherits both
+`cl-cmatrix-error` and `type-error`; the standard `type-error-datum` and
+`type-error-expected-type` readers remain available.
 
 ### `invalid-dimensions`
 

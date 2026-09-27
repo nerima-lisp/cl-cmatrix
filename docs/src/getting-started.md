@@ -48,6 +48,7 @@ is the only remaining condition.
 ```sh
 cl-cmatrix                     # default green rain at normal speed
 cl-cmatrix --speed 2            # fall twice as fast
+cl-cmatrix --speed 0.1          # CLI minimum (the library accepts any positive real)
 cl-cmatrix -C cyan               # a different color scheme
 cl-cmatrix -C rainbow            # a different scheme per column
 cl-cmatrix -c                    # upstream's classic CJK glyphs (U+3000-U+303E)

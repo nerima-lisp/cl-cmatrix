@@ -7,9 +7,12 @@
       (let ((condition (handler-case (matrix-advance state :workers 0)
                         (cl-cmatrix-error (condition) condition)
                         (type-error () nil))))
-        (expect (and (typep condition 'cl-cmatrix-error)
-                     (typep condition 'type-error))
-                :to-be-truthy))))
+        (with-soft-assertions
+          (expect (and (typep condition 'cl-cmatrix-error)
+                       (typep condition 'type-error))
+                  :to-be-truthy)
+          (expect (type-error-datum condition) :to-equal 0)
+          (expect (type-error-expected-type condition) :to-equal '(integer 1 *))))))
 
   (it "lets callers catch invalid random state as both condition families"
     (let ((condition (handler-case (make-matrix-state 2 2 :random-state :bad)
