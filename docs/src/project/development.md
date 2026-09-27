@@ -194,3 +194,11 @@ nix fmt
 One `treefmt` evaluation drives both `nix fmt` and `checks.formatting`, so
 the formatter and CI can never disagree about what "formatted" means. It
 formats Nix sources only; Lisp and Markdown are not treefmt's concern here.
+
+## Releasing
+
+1. Update both `:version` entries in `cl-cmatrix.asd`.
+2. Merge the change into `main`.
+3. Push the matching `vX.Y.Z` tag.
+4. Confirm that the release workflow succeeds.
+5. Fill in the GitHub Release notes and publish the draft.

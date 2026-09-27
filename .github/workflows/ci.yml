@@ -30,6 +30,23 @@ jobs:
       - name: Check flake
         run: nix flake check --print-build-logs
 
+  check-darwin:
+    name: Check flake (aarch64-darwin)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix-setup
+        with:
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Check flake
+        run: nix flake check --print-build-logs
+
   pty-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
